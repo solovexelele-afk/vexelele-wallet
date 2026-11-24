@@ -14,6 +14,7 @@ const S = {
   draft: null, newWords: null, nfts: [], change24: null, updated: 0, prices: {},
   popImg: (() => { try { return JSON.parse(localStorage.getItem('vxw-popimg')) || {}; } catch (e) { return {}; } })(),
   theme: (() => { try { return localStorage.getItem('vxw-theme') || 'std'; } catch (e) { return 'std'; } })(),
+  hideScam: (() => { try { return localStorage.getItem('vxw-hidescam') === '1'; } catch (e) { return false; } })(),
   hideZero: (() => { try { return localStorage.getItem('vxw-hidezero') === '1'; } catch (e) { return false; } })(),
   hide: (() => { try { return localStorage.getItem('vxw-hide') === '1'; } catch (e) { return false; } })()
 };
@@ -140,7 +141,7 @@ function walletAvatar(rec, size = 40) {
 }
 function resetWalletState() {
   forgetSecret();
-  Object.assign(S, { wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [], nfts: [], loaded: false, updated: 0, rateAt: 0, draft: null });
+  Object.assign(S, { wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [], nfts: [], loaded: false, updated: 0, rateAt: 0, draft: null, evMore: null });
   lastSig = '';
 }
 async function switchWallet(id) {
@@ -327,19 +328,24 @@ async function refresh() {
     // 3) токены
     try {
       const j = await get(`/v2/accounts/${raw}/jettons?currencies=usd`);
-      S.jettons = (j.balances || []).filter(x => x.balance !== '0' && x.jetton?.verification !== 'blacklist');
+      S.jettons = (j.balances || []).filter(x => x.balance !== '0');
       paint();
     } catch (e) {}
     // 4) история, спам-переводы прячем
     try {
       const ev = await get(`/v2/accounts/${raw}/events?limit=40`);
-      S.events = (ev.events || []).filter(e => !e.is_scam && !(e.actions || []).some(a => (a.TonTransfer || a.JettonTransfer || {}).sender?.is_scam));
+      const fresh = ev.events || [];
+      // свежая первая страница + уже подгруженные старые операции
+      const ids = new Set(fresh.map(e => e.event_id));
+      const older = S.events.filter(e => !ids.has(e.event_id) && fresh.length && e.lt < fresh[fresh.length - 1].lt);
+      S.events = fresh.concat(older);
+      if (S.evMore == null) S.evMore = fresh.length >= 40;
       if (S.tab === 'history') paint();
     } catch (e) {}
     // 5) NFT
     try {
       const n = await get(`/v2/accounts/${raw}/nfts?limit=60&indirect_ownership=false`);
-      S.nfts = (n.nft_items || []).filter(x => x.trust !== 'blacklist');
+      S.nfts = n.nft_items || [];
     } catch (e) {}
     S.loaded = true; S.updated = Date.now();
     saveCache(); paint();
@@ -767,13 +773,20 @@ function renderHome() {
   app.querySelectorAll('.item.ev').forEach(el => el.onclick = () => render('tx', S.events[+el.dataset.i]));
   app.querySelectorAll('#list [data-nft]').forEach(el => el.onclick = () => render('nft', +el.dataset.nft));
   const ns = $('#b-nftsend'); if (ns) ns.onclick = () => render('nftPick');
+  bindHistoryTools();
 }
 V.home = renderHome;
+function bindHistoryTools() {
+  const sc = $('#b-scam');
+  if (sc) sc.onclick = () => { S.hideScam = !S.hideScam; try { localStorage.setItem('vxw-hidescam', S.hideScam ? '1' : '0'); } catch (e) {} lastSig = ''; if (S.view === 'asset') render('asset', S.assetId); else renderHome(); };
+  const mb = $('#b-more');
+  if (mb) mb.onclick = () => { mb.textContent = 'Загружаю…'; loadMoreEvents(); };
+}
 setInterval(() => { const a = document.getElementById('ago'); if (a) a.textContent = agoText(); }, 5000);
 
-function tokenRow({ asset, logo, name, verified, sub, amount, symbol, usdLine, zero }) {
-  return `<div class="item tap${zero ? ' zero' : ''}" data-asset="${esc(asset)}"><div class="ico">${logo}</div>
-    <div class="mid"><b>${esc(name)}${verified ? `<span class="ok" title="Проверенный токен">${ic('check', 14)}</span>` : ''}</b><small>${sub}</small></div>
+function tokenRow({ asset, logo, name, verified, scam, sub, amount, symbol, usdLine, zero }) {
+  return `<div class="item tap${zero ? ' zero' : ''}${scam ? ' scam' : ''}" data-asset="${esc(asset)}"><div class="ico">${logo}</div>
+    <div class="mid"><b>${esc(name)}${scam ? SCAM_TAG : ''}${verified ? `<span class="ok" title="Проверенный токен">${ic('check', 14)}</span>` : ''}</b><small>${sub}</small></div>
     <div class="right">${hid(fmt(amount))} ${esc(symbol)}<small>${usdLine}</small></div></div>`;
 }
 function tokensHtml() {
@@ -784,11 +797,12 @@ function tokensHtml() {
     amount: S.balance, symbol: 'TON', usdLine: tonUsd ? hid('$' + fmt(tonUsd, 2)) : '', zero: !S.balance }));
   const held = new Set();
   for (const j of S.jettons) {
+    if (S.hideScam && isScamJetton(j)) continue;
     const d = j.jetton.decimals ?? 9, amt = Number(j.balance) / 10 ** d, usd = j.price?.prices?.USD;
     const img = safeImg(j.jetton.image), raw = String(j.jetton.address).toLowerCase(); held.add(raw);
     const pop = POPULAR.find(t => t.id === raw);
     rows.push(tokenRow({ asset: j.jetton.address, logo: pop?.logo ? pop.logo() : img ? `<img src="${img}" alt="" loading="lazy">` : esc((j.jetton.symbol || '?')[0]),
-      name: j.jetton.name, verified: j.jetton.verification === 'whitelist', sub: usd ? '$' + fmt(usd, usd < 0.01 ? 6 : 3) : esc(j.jetton.symbol),
+      name: j.jetton.name, verified: j.jetton.verification === 'whitelist', scam: isScamJetton(j), sub: usd ? '$' + fmt(usd, usd < 0.01 ? 6 : 3) : esc(j.jetton.symbol),
       amount: amt, symbol: j.jetton.symbol, usdLine: usd ? hid('$' + fmt(amt * usd, 2)) : '' }));
   }
   if (!S.hideZero) for (const t of POPULAR) {
@@ -836,8 +850,9 @@ function nftHtml() {
   if (!S.nfts.length) return '<div class="empty">NFT пока нет</div>';
   return `<div class="list-head"><span>NFT · ${S.nfts.length}</span><button id="b-nftsend">${ic('send', 14)} Отправить NFT</button></div>
   <div class="nfts">${S.nfts.map((n, i) => {
+    if (S.hideScam && isScamNft(n)) return '';
     const img = nftImg(n);
-    return `<button class="nft" data-nft="${i}">
+    return `<button class="nft${isScamNft(n) ? ' scam' : ''}" data-nft="${i}">${isScamNft(n) ? `<span class="nft-scam">${SCAM_TAG}</span>` : ''}
       <div class="nft-img">${img ? `<img src="${img}" alt="" loading="lazy">` : ic('image', 24)}</div>
       <b>${esc(n.metadata?.name || n.dns || 'Без названия')}</b><small>${esc(n.collection?.name || 'Без коллекции')}</small></button>`;
   }).join('')}</div>`;
@@ -1108,11 +1123,33 @@ V.swap = () => {
   if (st.amount) quote();
 };
 
+/* скам: tonapi помечает такие события, отправителей, токены и NFT */
+const isScamEvent = e => !!(e.is_scam || (e.actions || []).some(a => (a.TonTransfer || a.JettonTransfer || a.NftItemTransfer || {}).sender?.is_scam || a.JettonTransfer?.jetton?.verification === 'blacklist'));
+const isScamJetton = j => j.jetton?.verification === 'blacklist';
+const isScamNft = n => n.trust === 'blacklist';
+const SCAM_TAG = '<span class="tag-scam">Скам</span>';
+async function loadMoreEvents() {
+  if (!S.events.length || S.evLoading) return;
+  S.evLoading = true;
+  try {
+    const last = S.events[S.events.length - 1];
+    const r = await get(`/v2/accounts/${encodeURIComponent(S.raw)}/events?limit=40&before_lt=${last.lt}`);
+    const more = (r.events || []).filter(e => !S.events.some(x => x.event_id === e.event_id));
+    S.events = S.events.concat(more);
+    S.evMore = (r.events || []).length >= 40;
+  } catch (e) { toast('Не удалось загрузить, попробуй ещё раз'); }
+  S.evLoading = false;
+  lastSig = ''; if (S.view === 'home') renderHome(); else if (S.view === 'asset') render('asset', S.assetId);
+}
 function historyHtml(only, emptyText) {
   if (!S.loaded) return '<div class="empty">Загружаю…</div>';
-  const list = S.events.map((e, idx) => [e, idx]).filter(([e]) => !only || only(e));
-  if (!list.length) return `<div class="empty">${emptyText || 'Пока нет операций. Нажми «Получить», чтобы пополнить кошелёк'}</div>`;
-  return list.map(([e, idx]) => {
+  const all = S.events.map((e, idx) => [e, idx]).filter(([e]) => !only || only(e));
+  const scamCount = all.filter(([e]) => isScamEvent(e)).length;
+  const list = S.hideScam ? all.filter(([e]) => !isScamEvent(e)) : all;
+  const head = `<div class="list-head"><span>Операции</span>${scamCount || S.hideScam ? `<button id="b-scam">${S.hideScam ? `Показать скам${scamCount ? ' · ' + scamCount : ''}` : 'Скрыть скам'}</button>` : ''}</div>`;
+  const more = S.evMore ? `<button class="btn more" id="b-more">${S.evLoading ? 'Загружаю…' : 'Показать ещё'}</button>` : '';
+  if (!list.length) return head + `<div class="empty">${emptyText || 'Пока нет операций. Нажми «Получить», чтобы пополнить кошелёк'}</div>` + more;
+  return head + list.map(([e, idx]) => {
     const a = e.actions?.[0]; if (!a) return '';
     const when = new Date(e.timestamp * 1000).toLocaleString('ru', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     const pend = e.in_progress ? ' · в обработке' : '';
@@ -1130,10 +1167,11 @@ function historyHtml(only, emptyText) {
       amount = `${incoming ? '+' : '−'}${fmt(val)} ${esc(sym)}`;
       sub = (incoming ? 'от ' : 'кому ') + otherAddr + (t.comment ? ' · «' + t.comment + '»' : '');
     }
-    return `<div class="item ev" data-i="${idx}"><div class="ico ${cls === 'plus' ? 'in' : cls === 'minus' ? 'out' : ''}">${dir}</div>
-      <div class="mid"><b>${esc(title)}${esc(pend + fail)}</b><small>${esc(sub)}</small></div>
+    const scam = isScamEvent(e);
+    return `<div class="item ev${scam ? ' scam' : ''}" data-i="${idx}"><div class="ico ${cls === 'plus' ? 'in' : cls === 'minus' ? 'out' : ''}">${dir}</div>
+      <div class="mid"><b>${esc(title)}${esc(pend + fail)}${scam ? SCAM_TAG : ''}</b><small>${esc(sub)}</small></div>
       <div class="right"><span class="${cls}">${S.hide ? '••••' : amount}</span><small>${esc(when)}</small></div></div>`;
-  }).join('');
+  }).join('') + more;
 }
 
 function friendly(raw, bounce) {
@@ -1162,6 +1200,7 @@ V.tx = e => {
       <h2>${t ? (incoming ? 'Получено' : 'Отправлено') : esc(a.simple_preview?.name || a.type || 'Операция')}</h2>
       ${amountLine ? `<div class="tx-amt ${incoming ? 'plus' : 'minus'}">${esc(amountLine)}</div>` : `<p class="muted">${esc(a.simple_preview?.description || '')}</p>`}
     </div>
+    ${isScamEvent(e) ? '<div class="note scam-note"><b>Это скам.</b> Не переходи по ссылкам из комментария и не отправляй ничего в ответ</div>' : ''}
     <div class="sum">
       <div><span>Статус</span><span>${status}</span></div>
       <div><span>Дата</span><span>${esc(when)}</span></div>
@@ -1196,7 +1235,7 @@ function recents() {
 
 /* ---------- экран актива ---------- */
 V.asset = id => {
-  id = String(id || 'TON');
+  id = String(id || 'TON'); S.assetId = id;
   const isTon = id === 'TON', isMkt = id.startsWith('mkt:');
   const low = id.toLowerCase();
   const j = !isTon && !isMkt ? S.jettons.find(x => String(x.jetton.address).toLowerCase() === low) : null;
@@ -1228,13 +1267,13 @@ V.asset = id => {
       <button class="act" id="a-recv"${isMkt ? ' disabled' : ''}><b>${ic('down', 20)}</b>Получить</button>
     </div>
     ${isMkt ? `<div class="note">${esc(name)} работает в своей сети. Starlify Wallet пока хранит только TON и токены сети TON, поэтому отправка и получение ${esc(symbol)} недоступны</div>` : ''}
-    <div class="list-head"><span>История ${esc(symbol)}</span></div>
     <div class="list">${historyHtml(only, isMkt ? 'Истории нет' : `Операций с ${esc(symbol)} пока нет`)}</div>
   </div>`;
   $('#b-back').onclick = () => render('home');
   $('#a-send').onclick = () => { S.draft = null; render('send', isTon ? 'TON' : j?.jetton.address); };
   $('#a-recv').onclick = () => render('receive');
   app.querySelectorAll('.item.ev').forEach(el => el.onclick = () => render('tx', S.events[+el.dataset.i]));
+  bindHistoryTools();
 };
 
 V.receive = () => {
@@ -1271,6 +1310,7 @@ V.receive = () => {
 };
 
 /* ---------- активы и переводы ---------- */
+const MIN_TON_SEND = 0.05;   // минимальная сумма отправки TON
 const JETTON_GAS = '0.05';   // уходит на газ токен-перевода, неизрасходованное возвращается
 function assets() {
   return [{ id: 'TON', symbol: 'TON', name: 'Toncoin', balance: S.balance, decimals: 9, image: '' }]
@@ -1370,7 +1410,9 @@ V.send = preset => {
     const left = Math.max(0, cur.balance - n);
     $('#left').textContent = `Останется: ${fmt(left, 6)} ${cur.symbol}`;
     $('#left').classList.toggle('over', n > cur.balance);
-    $('#b-next').disabled = !(TW.utils.Address.isValid($('#to').value.trim()) && n > 0 && n <= cur.balance);
+    const tooSmall = cur.id === 'TON' && n > 0 && n < MIN_TON_SEND;
+    $('#err').textContent = tooSmall ? `Минимум ${MIN_TON_SEND} TON` : '';
+    $('#b-next').disabled = !(TW.utils.Address.isValid($('#to').value.trim()) && n > 0 && n <= cur.balance && !tooSmall);
   };
   const keep = () => ({ to: $('#to').value.trim(), amountInput: $('#amt').value.trim(), comment: $('#cmt').value, fiat });
   $('#amt').oninput = () => { all = false; check(); };
@@ -1405,6 +1447,7 @@ V.send = preset => {
     const re = new RegExp(`^\\d+(\\.\\d{1,${cur.decimals}})?$`);
     if (!re.test(amount) || !(Number(amount) > 0)) return err('Введи сумму');
     if (cur.id === 'TON') {
+      if (Number(amount) < MIN_TON_SEND) return err(`Минимальная сумма отправки — ${MIN_TON_SEND} TON`);
       if (Number(amount) > cur.balance) return err('Недостаточно TON');
     } else {
       if (toUnits(amount, cur.decimals).gt(new TW.utils.BN(cur.units))) return err(`Недостаточно ${cur.symbol}`);
@@ -1534,6 +1577,7 @@ V.settings = () => {
     <h2>Настройки</h2>
     <div class="list">
       <button class="setting" id="b-wallets"><span>Кошельки</span><span class="setting-val">${esc(walletName())}${ic('chev', 16)}</span></button>
+      <button class="setting" id="b-hidescam"><span>Скрывать скам</span><span class="switch ${S.hideScam ? 'on' : ''}"></span></button>
       <button class="setting" id="b-theme"><span>Оформление</span><span class="setting-val">${S.theme === 'gray' ? 'Серое' : 'Стандартное'}${ic('chev', 16)}</span></button>
       <button class="setting" id="b-phrase"><span>Показать секретную фразу</span>${ic('chev', 16)}</button>
       <button class="setting danger" id="b-del"><span>Удалить кошелёк с устройства</span>${ic('chev', 16)}</button>
@@ -1543,6 +1587,7 @@ V.settings = () => {
   $('#b-back').onclick = () => render('home');
   $('#b-phrase').onclick = () => render('phrase');
   $('#b-wallets').onclick = () => render('wallets');
+  $('#b-hidescam').onclick = () => { S.hideScam = !S.hideScam; try { localStorage.setItem('vxw-hidescam', S.hideScam ? '1' : '0'); } catch (e) {} lastSig = ''; render('settings'); };
   $('#b-del').onclick = () => render('reset');
   $('#b-theme').onclick = () => {
     S.theme = S.theme === 'gray' ? 'std' : 'gray';
