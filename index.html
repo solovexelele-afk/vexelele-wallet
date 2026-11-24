@@ -118,6 +118,19 @@
   .recents .lbl{margin:0 4px 0 0}
   .chip-btn{font-family:var(--mono);font-size:12px;border:1px solid var(--line);padding:6px 10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .chip-btn:hover{border-color:var(--acc);color:var(--acc)}
+  .pin-view{align-items:center;text-align:center}
+  .pin-view .back{align-self:flex-start}
+  .dots{display:flex;gap:18px;justify-content:center;margin:18px 0 4px}
+  .dots i{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--muted);transition:background .15s,border-color .15s,transform .15s}
+  .dots i.on{background:var(--acc);border-color:var(--acc);transform:scale(1.1)}
+  .dots.shake{animation:shake .4s}
+  @keyframes shake{20%,60%{transform:translateX(-10px)}40%,80%{transform:translateX(10px)}}
+  .pad{display:grid;grid-template-columns:repeat(3,76px);gap:14px;justify-content:center;margin:6px 0 10px}
+  .pad button{width:76px;height:76px;border-radius:50%;border:1px solid var(--line);font-family:var(--display);font-size:26px;font-weight:500;transition:background .12s,border-color .12s}
+  .pad button:hover{border-color:var(--acc)}
+  .pad button:active{background:var(--acc);color:#000}
+  .pad button[data-k=del]{border-color:transparent;font-size:22px;color:var(--muted)}
+  .pin-view .btn{max-width:320px}
   .item.tap{cursor:pointer;transition:background .15s}
   .item.tap:hover{background:var(--panel)}
   .assets{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}

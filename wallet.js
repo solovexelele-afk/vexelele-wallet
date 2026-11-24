@@ -1,5 +1,5 @@
 /* vexelele wallet — некастодиальный TON-кошелёк.
-   Секретная фраза шифруется паролем (PBKDF2 + AES-GCM) и хранится только в этом браузере.
+   Секретная фраза шифруется ПИН-кодом (PBKDF2 + AES-GCM) и хранится только в этом браузере.
    Никуда, кроме блокчейна (подписанные переводы), данные не отправляются. */
 (() => {
 'use strict';
@@ -206,6 +206,58 @@ async function detectVersion(words) {
   } catch (e) { return 'v5R1'; }
 }
 
+/* ---------- ПИН-код ---------- */
+const PIN_LEN = 4, ATT = 'vxw-att';
+function attempts() { try { return JSON.parse(localStorage.getItem(ATT)) || { n: 0, until: 0 }; } catch (e) { return { n: 0, until: 0 }; } }
+function setAttempts(a) { try { localStorage.setItem(ATT, JSON.stringify(a)); } catch (e) {} }
+let pinKey = null;
+addEventListener('keydown', e => { if (pinKey && document.querySelector('.pin-view')) pinKey(e); });
+/* opts: { title, sub, back, forgot, throttle, check: async pin => true | false | 'текст ошибки' } */
+function pinPad(opts) {
+  S.view = 'pin';
+  let pin = '', busy = false;
+  app.innerHTML = `<div class="view pin-view">
+    ${opts.back ? '<button class="back" id="b-back">← назад</button>' : ''}
+    <h2>${esc(opts.title)}</h2>
+    <p class="muted">${esc(opts.sub || '')}</p>
+    <div class="dots" id="dots">${'<i></i>'.repeat(PIN_LEN)}</div>
+    <div class="err" id="err"></div>
+    <div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-k="${n}">${n}</button>`).join('')}<span></span><button data-k="0">0</button><button data-k="del" aria-label="Стереть">⌫</button></div>
+    ${opts.forgot ? '<button class="btn danger" id="b-forgot">Забыл(а) ПИН-код</button>' : ''}
+  </div>`;
+  const dots = () => { const d = $('#dots'); if (d) d.querySelectorAll('i').forEach((x, i) => x.classList.toggle('on', i < pin.length)); };
+  const press = async k => {
+    if (busy || !$('#dots')) return;
+    if (opts.throttle) {
+      const a = attempts();
+      if (Date.now() < a.until) { $('#err').textContent = `Слишком много попыток. Подожди ${Math.ceil((a.until - Date.now()) / 1000)} сек.`; return; }
+    }
+    if (k === 'del') { pin = pin.slice(0, -1); dots(); return; }
+    if (pin.length >= PIN_LEN) return;
+    pin += k; dots(); $('#err').textContent = '';
+    if (pin.length < PIN_LEN) return;
+    busy = true;
+    const r = await opts.check(pin);
+    busy = false;
+    if (r === true) { if (opts.throttle) setAttempts({ n: 0, until: 0 }); return; }
+    if (!$('#dots')) return;
+    let msg = typeof r === 'string' ? r : 'Неверный ПИН-код';
+    if (opts.throttle && r === false) {
+      const a = attempts(); a.n++;
+      if (a.n >= 5) { a.until = Date.now() + 30000 * 2 ** (a.n - 5); msg = `Неверный ПИН-код. Следующая попытка через ${Math.round((a.until - Date.now()) / 1000)} сек.`; }
+      else msg += ` (осталось попыток: ${5 - a.n})`;
+      setAttempts(a);
+    }
+    $('#dots').classList.add('shake'); setTimeout(() => $('#dots')?.classList.remove('shake'), 400);
+    $('#err').textContent = msg;
+    pin = ''; dots();
+  };
+  app.querySelectorAll('[data-k]').forEach(b => b.onclick = () => press(b.dataset.k));
+  pinKey = e => { if (/^\d$/.test(e.key)) press(e.key); else if (e.key === 'Backspace') press('del'); };
+  if (opts.back) $('#b-back').onclick = opts.back;
+  if (opts.forgot) $('#b-forgot').onclick = opts.forgot;
+}
+
 /* ---------- views ---------- */
 function render(view, arg) {
   S.view = view;
@@ -219,7 +271,7 @@ const V = {};
 V.welcome = () => {
   app.innerHTML = `<div class="view">
     <h1>Твой TON.<br><span>Твои ключи.</span></h1>
-    <p class="muted">Кошелёк работает прямо в браузере. Секретная фраза шифруется твоим паролем и никуда не отправляется: ни мне, ни на сервер.</p>
+    <p class="muted">Кошелёк работает прямо в браузере. Секретная фраза шифруется твоим ПИН-кодом и никуда не отправляется: ни мне, ни на сервер.</p>
     <button class="btn primary" id="b-new">Создать кошелёк</button>
     <button class="btn" id="b-imp">У меня уже есть кошелёк</button>
     <div class="note">Совет: сначала попробуй в <b>тестовой сети</b> (Настройки → Тестовая сеть), там TON бесплатные.</div>
@@ -235,7 +287,7 @@ V.create = () => {
     <button class="back" id="b-back">← назад</button>
     <h2>Секретная фраза</h2>
     <p class="muted">Это 24 слова, которые и есть твой кошелёк. Запиши их на бумагу по порядку и храни в надёжном месте.</p>
-    <div class="note"><b>Никому не показывай эти слова.</b> Кто знает фразу, тот владеет деньгами. Если потеряешь фразу и пароль, восстановить кошелёк не сможет никто.</div>
+    <div class="note"><b>Никому не показывай эти слова.</b> Кто знает фразу, тот владеет деньгами. Если потеряешь фразу, восстановить кошелёк не сможет никто.</div>
     <div class="words blur" id="words">${S.newWords.map((w, i) => `<div><i>${i + 1}</i>${esc(w)}</div>`).join('')}</div>
     <button class="btn" id="b-show">Показать слова</button>
     <button class="btn primary" id="b-next" disabled>Я записал(а) все 24 слова</button>
@@ -293,33 +345,49 @@ V.import = () => {
 
 V.setpass = arg => {
   const words = Array.isArray(arg) ? arg : arg.words, ver = Array.isArray(arg) ? 'v5R1' : arg.ver;
-  app.innerHTML = `<div class="view">
-    <h2>Пароль</h2>
-    <p class="muted">Пароль защищает фразу в этом браузере. Он понадобится, чтобы открыть кошелёк и подтвердить перевод.</p>
-    <label class="field"><small class="lbl">Пароль (минимум 8 символов)</small><input type="password" id="p1" autocomplete="new-password"></label>
-    <label class="field"><small class="lbl">Повтори пароль</small><input type="password" id="p2" autocomplete="new-password"></label>
-    <div class="err" id="err"></div>
-    <button class="btn primary" id="b-ok">Готово</button>
-  </div>`;
-  $('#b-ok').onclick = async () => {
-    const p1 = $('#p1').value, p2 = $('#p2').value;
-    if (p1.length < 8) { $('#err').textContent = 'Пароль слишком короткий.'; return; }
-    if (p1 !== p2) { $('#err').textContent = 'Пароли не совпадают.'; return; }
-    $('#b-ok').disabled = true; $('#b-ok').textContent = 'Шифрую…';
-    const enc = await encryptWords(words, p1);
-    await openWallet(words, ver);
-    enc.pub = TW.utils.bytesToHex(S.keyPair.publicKey); enc.ver = ver;
-    try { localStorage.setItem(STORE, JSON.stringify(enc)); }
-    catch (e) { $('#err').textContent = 'Браузер не даёт сохранить данные (приватный режим?).'; return; }
-    words.fill(''); S.newWords = null;
-    bumpIdle(); render('home'); refresh();
-  };
+  pinPad({
+    title: arg.migrate ? 'Теперь вход по ПИН-коду' : 'Придумай ПИН-код',
+    sub: '4 цифры. Нужен, чтобы открыть кошелёк и подтвердить перевод.',
+    check: async p1 => {
+      pinPad({
+        title: 'Повтори ПИН-код', sub: 'Введи те же 4 цифры ещё раз.',
+        back: () => render('setpass', arg),
+        check: async p2 => {
+          if (p2 !== p1) return 'ПИН-коды не совпадают';
+          const enc = await encryptWords(words, p2);
+          await openWallet(words, ver);
+          Object.assign(enc, { kind: 'pin', pub: TW.utils.bytesToHex(S.keyPair.publicKey), ver });
+          try { localStorage.setItem(STORE, JSON.stringify(enc)); }
+          catch (e) { return 'Браузер не даёт сохранить данные (приватный режим?)'; }
+          setAttempts({ n: 0, until: 0 });
+          words.fill(''); S.newWords = null;
+          bumpIdle(); render('home'); refresh(); toast('ПИН-код установлен ✓');
+          return true;
+        }
+      });
+      return true;
+    }
+  });
 };
 
 V.unlock = () => {
+  const st = loadStore();
+  if (st && st.kind === 'pin') {
+    return pinPad({
+      title: 'С возвращением', sub: 'Введи ПИН-код', throttle: true,
+      forgot: () => render('reset'),
+      check: async pin => {
+        let w;
+        try { w = await decryptWords(pin); } catch (e) { return false; }
+        await openWallet(w); bumpIdle(); render('home'); refresh();
+        return true;
+      }
+    });
+  }
+  // старый кошелёк с паролем: один раз входим по паролю и переходим на ПИН
   app.innerHTML = `<div class="view">
     <h1>С возвращением</h1>
-    <p class="muted">Введи пароль, чтобы открыть кошелёк.</p>
+    <p class="muted">Введи старый пароль один раз. После этого вход будет по ПИН-коду из 4 цифр.</p>
     <label class="field"><small class="lbl">Пароль</small><input type="password" id="p" autocomplete="current-password"></label>
     <div class="err" id="err"></div>
     <button class="btn primary" id="b-ok">Открыть</button>
@@ -327,7 +395,7 @@ V.unlock = () => {
   </div>`;
   const go = async () => {
     $('#b-ok').disabled = true;
-    try { const w = await decryptWords($('#p').value); await openWallet(w); bumpIdle(); render('home'); refresh(); }
+    try { const w = await decryptWords($('#p').value); render('setpass', { words: w, ver: st?.ver || 'v4R2', migrate: true }); }
     catch (e) { $('#err').textContent = 'Неверный пароль.'; $('#b-ok').disabled = false; }
   };
   $('#b-ok').onclick = go;
@@ -340,14 +408,14 @@ V.reset = () => {
   app.innerHTML = `<div class="view">
     <button class="back" id="b-back">← назад</button>
     <h2>Удалить кошелёк с этого устройства</h2>
-    <div class="note">Пароль восстановить нельзя. Можно удалить кошелёк из браузера и заново импортировать его по <b>секретной фразе</b>. Без фразы доступ к деньгам будет потерян навсегда.</div>
+    <div class="note">ПИН-код восстановить нельзя. Можно удалить кошелёк из браузера и заново импортировать его по <b>секретной фразе</b>. Без фразы доступ к деньгам будет потерян навсегда.</div>
     <label class="field"><small class="lbl">Напиши «удалить», чтобы подтвердить</small><input id="c" autocomplete="off"></label>
     <button class="btn danger" id="b-del">Удалить из браузера</button>
   </div>`;
   $('#b-back').onclick = () => render(S.keyPair ? 'settings' : 'unlock');
   $('#b-del').onclick = () => {
     if ($('#c').value.trim().toLowerCase() !== 'удалить') { toast('Напиши «удалить»'); return; }
-    try { localStorage.removeItem(STORE); } catch (e) {}
+    try { localStorage.removeItem(STORE); localStorage.removeItem(ATT); } catch (e) {}
     if (S.keyPair) S.keyPair.secretKey.fill(0);
     Object.assign(S, { keyPair: null, wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [] });
     render('welcome');
@@ -644,7 +712,6 @@ V.confirmSend = () => {
       <div><span>Сеть</span><span>${S.net}</span></div>
     </div>
     <div class="note">Переводы в блокчейне <b>нельзя отменить</b>. Проверь адрес ещё раз.</div>
-    <label class="field"><small class="lbl">Пароль для подтверждения</small><input type="password" id="p" autocomplete="current-password"></label>
     <div class="err" id="err"></div>
     <button class="btn primary" id="b-go">Отправить ${esc(d.amount)} ${esc(d.symbol)}</button>
   </div>`;
@@ -658,12 +725,11 @@ V.confirmSend = () => {
     const need = isTon ? (d.all ? fee : +d.amount + fee) : Math.max(fee, +JETTON_GAS);
     if (need > S.balance) { $('#err').textContent = 'С учётом комиссии не хватает TON. Уменьши сумму или нажми «всё».'; $('#b-go').disabled = true; }
   }).catch(() => { if (S.view === 'confirmSend') { $('#fee').textContent = isTon ? 'обычно 0.0005–0.005 TON' : 'обычно 0.002–0.02 TON'; $('#total').textContent = `${esc(d.amount)} ${esc(d.symbol)} + комиссия`; } });
-  $('#b-go').onclick = async () => {
-    $('#b-go').disabled = true;
-    try { await decryptWords($('#p').value); }
-    catch (e) { $('#err').textContent = 'Неверный пароль.'; $('#b-go').disabled = false; return; }
-    sendNow();
-  };
+  $('#b-go').onclick = () => pinPad({
+    title: 'Подтверди перевод', sub: `${d.amount} ${d.symbol} → ${short(d.to)}`, throttle: true,
+    back: () => render('confirmSend'),
+    check: async pin => { try { await decryptWords(pin); } catch (e) { return false; } sendNow(); return true; }
+  });
 };
 
 async function getSeqno() {
@@ -742,28 +808,24 @@ V.settings = () => {
   $('#b-del').onclick = () => render('reset');
 };
 
-V.phrase = () => {
+V.phrase = () => pinPad({
+  title: 'Введи ПИН-код', sub: 'Чтобы показать секретную фразу', throttle: true,
+  back: () => render('settings'),
+  check: async pin => { let w; try { w = await decryptWords(pin); } catch (e) { return false; } showPhrase(w); return true; }
+});
+function showPhrase(w) {
+  S.view = 'phrase';
   app.innerHTML = `<div class="view">
     <button class="back" id="b-back">← назад</button>
     <h2>Секретная фраза</h2>
     <div class="note"><b>Убедись, что никто не смотрит на экран.</b> Никому не отправляй фразу и не вставляй её на сайты. Поддержка никогда её не спрашивает. Если копируешь, вставь сразу в надёжное место.</div>
-    <label class="field"><small class="lbl">Пароль</small><input type="password" id="p" autocomplete="current-password"></label>
-    <div class="err" id="err"></div>
-    <button class="btn primary" id="b-ok">Показать</button>
-    <div id="out"></div>
+    <div class="words">${w.map((x, i) => `<div><i>${i + 1}</i>${esc(x)}</div>`).join('')}</div>
+    <button class="btn" id="b-copy">Скопировать фразу</button>
   </div>`;
   $('#b-back').onclick = () => render('settings');
-  $('#b-ok').onclick = async () => {
-    try {
-      const w = await decryptWords($('#p').value);
-      $('#out').innerHTML = `<div class="words">${w.map((x, i) => `<div><i>${i + 1}</i>${esc(x)}</div>`).join('')}</div>
-        <button class="btn" id="b-copy" style="margin-top:12px">Скопировать фразу</button>`;
-      $('#b-copy').onclick = () => copySeed(w);
-      $('#b-ok').remove(); $('#err').textContent = '';
-      setTimeout(() => { if (S.view === 'phrase') render('settings'); }, 60000);
-    } catch (e) { $('#err').textContent = 'Неверный пароль.'; }
-  };
-};
+  $('#b-copy').onclick = () => copySeed(w);
+  setTimeout(() => { if (S.view === 'phrase') render('settings'); }, 60000);
+}
 
 async function switchNet() {
   S.net = S.net === 'testnet' ? 'mainnet' : 'testnet';
