@@ -60,6 +60,13 @@ const IC = {
   key: '<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>',
   layers: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  chevDown: '<path d="m6 9 6 6 6-6"/>',
+  swap: '<path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/>',
+  updown: '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
+  send: '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>',
+  ext: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   percent: '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>'
 };
 const ic = (n, size = 18) => `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -93,7 +100,50 @@ async function get(path) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
-function loadStore() { try { return JSON.parse(localStorage.getItem(STORE)); } catch (e) { return null; } }
+/* ---------- несколько кошельков ----------
+   vxw-wallets = { active, list: [{ id, name, ver, pub, raw, kind, v, salt, iv, ct }] }
+   Каждая запись — зашифрованная фраза своего кошелька. Старый формат (один кошелёк в 'vxw') переносится автоматически. */
+const WALLETS = 'vxw-wallets';
+function readWallets() {
+  try { const w = JSON.parse(localStorage.getItem(WALLETS)); if (w && Array.isArray(w.list) && w.list.length) return w; } catch (e) {}
+  try {
+    const old = JSON.parse(localStorage.getItem(STORE));
+    if (old && old.ct) {
+      const w = { active: 'w1', list: [{ id: 'w1', name: 'Кошелёк 1', ...old }] };
+      localStorage.setItem(WALLETS, JSON.stringify(w)); localStorage.removeItem(STORE);
+      return w;
+    }
+  } catch (e) {}
+  return null;
+}
+function writeWallets(w) { localStorage.setItem(WALLETS, JSON.stringify(w)); }
+function loadStore() { const w = readWallets(); return w ? (w.list.find(x => x.id === w.active) || w.list[0]) : null; }
+function saveWalletRecord(rec, replaceActive) {
+  const w = readWallets() || { active: null, list: [] };
+  const i = w.list.findIndex(x => x.id === w.active);
+  if (replaceActive && i >= 0) { rec.id = w.active; rec.name = w.list[i].name; w.list[i] = rec; }
+  else {
+    rec.id = 'w' + Date.now().toString(36);
+    let n = w.list.length + 1; while (w.list.some(x => x.name === `Кошелёк ${n}`)) n++;
+    rec.name = rec.name || `Кошелёк ${n}`;
+    w.list.push(rec); w.active = rec.id;
+  }
+  writeWallets(w);
+}
+function walletName() { return loadStore()?.name || 'Кошелёк'; }
+function resetWalletState() {
+  forgetSecret();
+  Object.assign(S, { wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [], nfts: [], loaded: false, updated: 0, rateAt: 0, draft: null });
+  lastSig = '';
+}
+async function switchWallet(id) {
+  const w = readWallets(); if (!w || !w.list.some(x => x.id === id)) return;
+  w.active = id; writeWallets(w);
+  resetWalletState();
+  await openPublic();
+  S.tab = 'tokens';
+  render('home'); refresh();
+}
 
 /* ---------- crypto ---------- */
 async function deriveKey(pass, salt) {
@@ -359,6 +409,7 @@ function pinPad(opts) {
 /* ---------- views ---------- */
 function render(view, arg) {
   S.view = view;
+  document.getElementById('splash')?.remove();
   document.body.classList.remove('still');
   (V[view] || V.welcome)(arg);
   scrollTo(0, 0);
@@ -431,7 +482,7 @@ V.create = () => {
     <button class="btn" id="b-show">Показать слова</button>
     <button class="btn primary" id="b-next" disabled>Я записал(а) все 24 слова</button>
   </div>`;
-  $('#b-back').onclick = () => { S.newWords = null; render('welcome'); };
+  $('#b-back').onclick = () => { S.newWords = null; render(S.adding ? 'wallets' : 'welcome'); };
   $('#b-show').onclick = () => {
     $('#words').classList.remove('blur'); $('#b-next').disabled = false;
     $('#b-show').textContent = 'Скопировать фразу';
@@ -470,7 +521,7 @@ V.import = () => {
     <button class="btn primary" id="b-ok">Продолжить</button>
     <p class="muted">Подходят кошельки Tonkeeper, MyTonWallet, Tonhub и других: новые W5 и старые v4R2, v3R2. Версия определится сама по балансу.</p>
   </div>`;
-  $('#b-back').onclick = () => render('welcome');
+  $('#b-back').onclick = () => render(S.adding ? 'wallets' : 'welcome');
   $('#b-ok').onclick = async () => {
     const words = $('#words').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length !== 24) { $('#err').textContent = `Нужно 24 слова, сейчас ${words.length}.`; return; }
@@ -484,6 +535,25 @@ V.import = () => {
 
 V.setpass = arg => {
   const words = Array.isArray(arg) ? arg : arg.words, ver = Array.isArray(arg) ? 'v5R1' : arg.ver;
+  const existing = readWallets();
+  if (existing && !arg.migrate && loadStore()?.kind === 'pin') {
+    return pinPad({
+      title: 'Введи ПИН-код', sub: 'Новый кошелёк будет защищён тем же ПИН-кодом', throttle: true,
+      back: () => render('wallets'),
+      check: async pin => {
+        try { (await decryptWords(pin)).fill(''); } catch (e) { return false; }
+        const enc = await encryptWords(words, pin);
+        resetWalletState();
+        await openWallet(words, ver);
+        Object.assign(enc, { kind: 'pin', pub: TW.utils.bytesToHex(S.keyPair.publicKey), ver, raw: S.raw });
+        try { saveWalletRecord(enc, false); } catch (e) { return 'Браузер не даёт сохранить данные'; }
+        words.fill(''); S.newWords = null; S.adding = false; forgetSecret();
+        loadCache(); S.tab = 'tokens';
+        render('home'); refresh(); toast('Кошелёк добавлен');
+        return true;
+      }
+    });
+  }
   pinPad({
     title: arg.migrate ? 'Теперь вход по ПИН-коду' : 'Придумай ПИН-код',
     sub: '4 цифры. Нужен, чтобы открыть кошелёк и подтвердить перевод.',
@@ -495,8 +565,8 @@ V.setpass = arg => {
           if (p2 !== p1) return 'ПИН-коды не совпадают';
           const enc = await encryptWords(words, p2);
           await openWallet(words, ver);
-          Object.assign(enc, { kind: 'pin', pub: TW.utils.bytesToHex(S.keyPair.publicKey), ver });
-          try { localStorage.setItem(STORE, JSON.stringify(enc)); }
+          Object.assign(enc, { kind: 'pin', pub: TW.utils.bytesToHex(S.keyPair.publicKey), ver, raw: S.raw });
+          try { saveWalletRecord(enc, !!arg.migrate); }
           catch (e) { return 'Браузер не даёт сохранить данные (приватный режим?)'; }
           setAttempts({ n: 0, until: 0 });
           words.fill(''); S.newWords = null; forgetSecret();
@@ -544,21 +614,77 @@ V.unlock = () => {
 };
 
 V.reset = () => {
+  const name = walletName();
   app.innerHTML = `<div class="view">
     <button class="back" id="b-back">${ic('back', 16)}Назад</button>
-    <h2>Удалить кошелёк с этого устройства</h2>
-    <div class="note">ПИН-код восстановить нельзя. Можно удалить кошелёк из браузера и заново импортировать его по <b>секретной фразе</b>. Без фразы доступ к деньгам будет потерян навсегда.</div>
+    <h2>Удалить «${esc(name)}» с этого устройства</h2>
+    <div class="note">Кошелёк исчезнет только из этого браузера, деньги останутся в блокчейне. Вернуть его можно по <b>секретной фразе</b>. Без фразы доступ к деньгам будет потерян навсегда.</div>
     <label class="field"><small class="lbl">Напиши «удалить», чтобы подтвердить</small><input id="c" autocomplete="off"></label>
-    <button class="btn danger" id="b-del">Удалить из браузера</button>
+    <button class="btn danger" id="b-del">Удалить кошелёк</button>
   </div>`;
   $('#b-back').onclick = () => render(S.raw ? 'settings' : (loadStore() ? 'unlock' : 'welcome'));
-  $('#b-del').onclick = () => {
+  $('#b-del').onclick = async () => {
     if ($('#c').value.trim().toLowerCase() !== 'удалить') { toast('Напиши «удалить»'); return; }
+    const w = readWallets();
+    const left = w ? w.list.filter(x => x.id !== w.active) : [];
+    try { if (S.raw) localStorage.removeItem('vxw-cache-' + S.raw); } catch (e) {}
+    resetWalletState(); S.pub = null;
+    if (left.length) { writeWallets({ active: left[0].id, list: left }); await switchWallet(left[0].id); toast('Кошелёк удалён'); return; }
     try { Object.keys(localStorage).filter(k => k.startsWith('vxw')).forEach(k => localStorage.removeItem(k)); } catch (e) {}
-    forgetSecret(); S.pub = null;
-    Object.assign(S, { keyPair: null, wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [] });
     render('welcome');
   };
+};
+
+/* ---------- список кошельков ---------- */
+V.wallets = async () => {
+  const w = readWallets(); if (!w) return render('welcome');
+  const rows = await Promise.all(w.list.map(async rec => {
+    let raw = rec.raw;
+    if (!raw && rec.pub) { try { raw = (await makeWallet(rec.ver || 'v4R2', TW.utils.hexToBytes(rec.pub)).getAddress()).toString(false).toLowerCase(); } catch (e) {} }
+    let bal = null;
+    try { const c = JSON.parse(localStorage.getItem('vxw-cache-' + raw)); if (c) bal = c.balance; } catch (e) {}
+    return { rec, addr: raw ? friendly(raw, false) : '', bal };
+  }));
+  if (S.view !== 'wallets') return;
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <h2>Кошельки</h2>
+    <div class="wallets">${rows.map(({ rec, addr, bal }) => `
+      <div class="wrow ${rec.id === w.active ? 'on' : ''}" data-id="${esc(rec.id)}">
+        <button class="wpick" data-id="${esc(rec.id)}">
+          <span class="wav">${esc((rec.name || 'К')[0].toUpperCase())}</span>
+          <span class="wmid"><b>${esc(rec.name)}</b><small>${esc(short(addr))}${rec.ver ? ' · ' + (VER_NAME[rec.ver] || rec.ver) : ''}</small></span>
+          <span class="wbal">${bal == null ? '' : S.hide ? '••••' : fmt(bal, 2) + ' TON'}</span>
+        </button>
+        <button class="wedit" data-id="${esc(rec.id)}" aria-label="Переименовать">${ic('edit', 16)}</button>
+      </div>`).join('')}
+    </div>
+    <button class="btn primary" id="b-newwallet">${ic('plus', 18)}Создать новый кошелёк</button>
+    <button class="btn" id="b-impwallet">Добавить по секретной фразе</button>
+  </div>`;
+  $('#b-back').onclick = () => render(S.raw ? 'home' : 'welcome');
+  app.querySelectorAll('.wpick').forEach(b => b.onclick = () => { if (b.dataset.id === w.active) render('home'); else switchWallet(b.dataset.id); });
+  app.querySelectorAll('.wedit').forEach(b => b.onclick = () => render('rename', b.dataset.id));
+  $('#b-newwallet').onclick = async () => { S.adding = true; S.newWords = await MN.generateMnemonic(); render('create'); };
+  $('#b-impwallet').onclick = () => { S.adding = true; render('import'); };
+};
+V.rename = id => {
+  const w = readWallets(); const rec = w?.list.find(x => x.id === id); if (!rec) return render('wallets');
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <h2>Название кошелька</h2>
+    <label class="field"><small class="lbl">Видно только тебе</small><input id="nm" maxlength="24" value="${esc(rec.name)}" autocomplete="off"></label>
+    <button class="btn primary" id="b-save">Сохранить</button>
+  </div>`;
+  $('#nm').focus(); $('#nm').select();
+  const save = () => {
+    const v = $('#nm').value.trim().slice(0, 24); if (!v) return toast('Введи название');
+    const w2 = readWallets(); const r2 = w2.list.find(x => x.id === id); if (r2) { r2.name = v; writeWallets(w2); }
+    render('wallets');
+  };
+  $('#b-back').onclick = () => render('wallets');
+  $('#b-save').onclick = save;
+  $('#nm').onkeydown = e => { if (e.key === 'Enter') save(); };
 };
 
 const hid = s => S.hide ? '••••' : s;
@@ -585,7 +711,7 @@ function renderHome() {
   app.innerHTML = `<div class="view">
     <div class="balance">
       <div class="bal-top">
-        <span class="bal-brand">Всего на кошельке</span>
+        <button class="wsw" id="b-wsw">${esc(walletName())}${ic('chevDown', 14)}</button>
         <span class="bal-tools"><button id="b-hide" aria-label="${S.hide ? 'Показать баланс' : 'Скрыть баланс'}">${ic(S.hide ? 'eyeOff' : 'eye', 16)}</button><button id="b-ref" aria-label="Обновить">${ic('refresh', 16)}</button></span>
       </div>
       <div class="amt">${S.hide && S.loaded ? '••••' : big}</div>
@@ -595,6 +721,7 @@ function renderHome() {
     <div class="actions">
       <button class="act primary" id="b-send"><b>${ic('up', 20)}</b>Отправить</button>
       <button class="act" id="b-recv"><b>${ic('down', 20)}</b>Получить</button>
+      <button class="act" id="b-swap"><b>${ic('swap', 20)}</b>Обмен</button>
       <button class="act" id="b-set"><b>${ic('settings', 20)}</b>Настройки</button>
     </div>
     <div class="tabs">${[['tokens', 'Активы'], ['nft', 'NFT'], ['history', 'История']]
@@ -605,6 +732,8 @@ function renderHome() {
   $('#b-send').onclick = () => { S.draft = null; render('send'); };
   $('#b-recv').onclick = () => render('receive');
   $('#b-set').onclick = () => render('settings');
+  $('#b-swap').onclick = () => { S.swap = null; render('swap'); };
+  $('#b-wsw').onclick = () => render('wallets');
   $('#b-hide').onclick = () => { S.hide = !S.hide; try { localStorage.setItem('vxw-hide', S.hide ? '1' : '0'); } catch (e) {} renderHome(); };
   $('#b-ref').onclick = async e => { e.currentTarget.classList.add('spinning'); await refresh(); };
   app.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { S.tab = b.dataset.t; renderHome(); });
@@ -619,6 +748,8 @@ function renderHome() {
   const z = $('#b-zero');
   if (z) z.onclick = () => { S.hideZero = !S.hideZero; try { localStorage.setItem('vxw-hidezero', S.hideZero ? '1' : '0'); } catch (e) {} renderHome(); };
   app.querySelectorAll('.item.ev').forEach(el => el.onclick = () => render('tx', S.events[+el.dataset.i]));
+  app.querySelectorAll('#list [data-nft]').forEach(el => el.onclick = () => render('nft', +el.dataset.nft));
+  const ns = $('#b-nftsend'); if (ns) ns.onclick = () => render('nftPick');
 }
 V.home = renderHome;
 setInterval(() => { const a = document.getElementById('ago'); if (a) a.textContent = agoText(); }, 5000);
@@ -679,19 +810,289 @@ function marketHtml() {
   }).join('');
 }
 
+function nftImg(n, res = '500x500') {
+  const pr = (n.previews || []).find(p => p.resolution === res) || (n.previews || [])[0];
+  return safeImg(pr?.url);
+}
 function nftHtml() {
   if (!S.loaded) return '<div class="empty">Загружаю…</div>';
-  if (!S.nfts.length) return '<div class="empty">NFT пока нет.</div>';
-  const host = S.net === 'testnet' ? 'https://testnet.tonviewer.com/' : 'https://tonviewer.com/';
-  return `<div class="nfts">${S.nfts.map(n => {
-    const pr = (n.previews || []).find(p => p.resolution === '500x500') || (n.previews || [])[0];
-    const img = safeImg(pr?.url);
-    const name = n.metadata?.name || n.dns || 'Без названия';
-    return `<a class="nft" href="${host}${esc(n.address)}" target="_blank" rel="noopener noreferrer">
+  if (!S.nfts.length) return '<div class="empty">NFT пока нет</div>';
+  return `<div class="list-head"><span>NFT · ${S.nfts.length}</span><button id="b-nftsend">${ic('send', 14)} Отправить NFT</button></div>
+  <div class="nfts">${S.nfts.map((n, i) => {
+    const img = nftImg(n);
+    return `<button class="nft" data-nft="${i}">
       <div class="nft-img">${img ? `<img src="${img}" alt="" loading="lazy">` : ic('image', 24)}</div>
-      <b>${esc(name)}</b><small>${esc(n.collection?.name || '')}</small></a>`;
+      <b>${esc(n.metadata?.name || n.dns || 'Без названия')}</b><small>${esc(n.collection?.name || 'Без коллекции')}</small></button>`;
   }).join('')}</div>`;
 }
+
+/* ---------- NFT: просмотр и отправка ---------- */
+const NFT_GAS = '0.05';   // уходит на газ передачи NFT, неизрасходованное возвращается
+V.nft = i => {
+  const n = S.nfts[+i]; if (!n) return render('home');
+  const img = nftImg(n, '1500x1500') || nftImg(n);
+  const host = 'https://tonviewer.com/';
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <div class="nft-big">${img ? `<img src="${img}" alt="">` : ic('image', 48)}</div>
+    <div><h2>${esc(n.metadata?.name || n.dns || 'Без названия')}</h2><p class="muted">${esc(n.collection?.name || 'Без коллекции')}</p></div>
+    ${n.metadata?.description ? `<p class="muted">${esc(String(n.metadata.description).slice(0, 400))}</p>` : ''}
+    <button class="btn primary" id="b-send">${ic('send', 18)}Отправить NFT</button>
+    <a class="btn" href="${host}${esc(n.address)}" target="_blank" rel="noopener noreferrer">${ic('ext', 16)}Открыть в обозревателе</a>
+  </div>`;
+  $('#b-back').onclick = () => { S.tab = 'nft'; render('home'); };
+  $('#b-send').onclick = () => { S.draft = { kind: 'nft', idx: +i }; render('nftSend'); };
+};
+V.nftPick = () => {
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <h2>Какой NFT отправить</h2>
+    ${S.nfts.length ? `<div class="nfts">${S.nfts.map((n, i) => { const img = nftImg(n); return `<button class="nft" data-nft="${i}">
+      <div class="nft-img">${img ? `<img src="${img}" alt="" loading="lazy">` : ic('image', 24)}</div>
+      <b>${esc(n.metadata?.name || n.dns || 'Без названия')}</b><small>${esc(n.collection?.name || 'Без коллекции')}</small></button>`; }).join('')}</div>`
+      : '<div class="empty">На этом кошельке нет NFT</div>'}
+  </div>`;
+  $('#b-back').onclick = () => { S.tab = 'nft'; render('home'); };
+  app.querySelectorAll('[data-nft]').forEach(b => b.onclick = () => { S.draft = { kind: 'nft', idx: +b.dataset.nft }; render('nftSend'); });
+};
+V.nftSend = () => {
+  const d = S.draft || {}; const n = S.nfts[d.idx]; if (!n) return render('home');
+  const img = nftImg(n);
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <h2>Отправить NFT</h2>
+    <div class="nft-row"><div class="nft-thumb">${img ? `<img src="${img}" alt="">` : ic('image', 20)}</div>
+      <div><b>${esc(n.metadata?.name || n.dns || 'Без названия')}</b><small>${esc(n.collection?.name || 'Без коллекции')}</small></div></div>
+    <label class="field"><small class="lbl">Адрес получателя <button type="button" id="b-paste">вставить</button></small><input id="to" value="${esc(d.to || '')}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="UQ… или EQ…"></label>
+    ${recents().length ? `<div class="recents"><small class="lbl">Недавние</small>${recents().map(r => `<button type="button" class="chip-btn" data-to="${esc(r.addr)}">${esc(r.name)}</button>`).join('')}</div>` : ''}
+    <div class="err" id="err"></div>
+    <button class="btn primary" id="b-next">Далее</button>
+  </div>`;
+  $('#b-back').onclick = () => render('nft', d.idx);
+  app.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { $('#to').value = b.dataset.to; });
+  $('#b-paste').onclick = async () => { try { $('#to').value = (await navigator.clipboard.readText()).trim(); } catch (e) { toast('Браузер не дал прочитать буфер. Вставь вручную'); } };
+  $('#b-next').onclick = () => {
+    const to = $('#to').value.trim(), err = m => { $('#err').textContent = m; };
+    if (!TW.utils.Address.isValid(to)) return err('Неверный адрес. Проверь, что это адрес в сети TON');
+    const A = new TW.utils.Address(to);
+    if (A.isUserFriendly && A.isTestOnly) return err('Это адрес тестовой сети');
+    if (A.toString(false).toLowerCase() === S.raw) return err('Это твой собственный адрес');
+    if (S.balance < +NFT_GAS) return err(`Нужно хотя бы ${NFT_GAS} TON на газ. Неиспользованное вернётся`);
+    const name = n.metadata?.name || n.dns || 'NFT';
+    S.draft = { kind: 'nft', idx: d.idx, nft: n.address, name, to, attach: NFT_GAS, doneText: `«${name}» отправлен на ${short(to)}` };
+    render('nftConfirm');
+  };
+};
+V.nftConfirm = () => {
+  const d = S.draft; const n = S.nfts[d.idx]; if (!n) return render('home');
+  const img = nftImg(n);
+  const uah = v => S.rate.uah ? ` (≈ ${fmt(v * S.rate.uah, 2)} ₴)` : '';
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Изменить</button>
+    <div class="tx-head"><div class="nft-thumb lg">${img ? `<img src="${img}" alt="">` : ic('image', 28)}</div>
+      <div class="tx-amt">${esc(d.name)}</div><p class="muted">на ${esc(short(d.to))}</p></div>
+    <div class="sum">
+      <div><span>NFT</span><span>${esc(d.name)}</span></div>
+      <div><span>Коллекция</span><span>${esc(n.collection?.name || '—')}</span></div>
+      <div><span>Кому</span><span>${esc(d.to)}</span></div>
+      <div><span>Комиссия сети</span><span id="fee">считаю…</span></div>
+      <div><span>Резерв на газ</span><span>${NFT_GAS} TON, неиспользованное вернётся</span></div>
+      <div><span>Комиссия Starlify</span><span>0 TON</span></div>
+    </div>
+    <div class="note">Передачу NFT <b>нельзя отменить</b>. Проверь адрес получателя</div>
+    <div class="err" id="err"></div>
+    <button class="btn primary" id="b-go">Отправить NFT</button>
+  </div>`;
+  $('#b-back').onclick = () => render('nftSend');
+  estimateFee(d).then(fee => { if (S.view === 'nftConfirm') $('#fee').textContent = `${fmt(fee, 6)} TON${uah(fee)}`; })
+    .catch(() => { if (S.view === 'nftConfirm') $('#fee').textContent = 'не удалось рассчитать'; });
+  $('#b-go').onclick = () => pinPad({
+    title: 'Подтверди отправку NFT', sub: `${d.name} → ${short(d.to)}`, throttle: true,
+    back: () => render('nftConfirm'),
+    check: async pin => {
+      let kp;
+      try { const w = await decryptWords(pin); kp = await MN.mnemonicToKeyPair(w); w.fill(''); } catch (e) { return false; }
+      sendNow(kp.secretKey); return true;
+    }
+  });
+};
+async function buildNftTransfer(d, secretKey, seqno) {
+  const C = TW.boc.Cell, body = new C();
+  body.bits.writeUint(0x5fcc3d14, 32);                 // nft transfer
+  body.bits.writeUint(0, 64);                          // query_id
+  body.bits.writeAddress(new TW.utils.Address(d.to));  // новый владелец
+  body.bits.writeAddress(S.addrObj);                   // сдача газа возвращается мне
+  body.bits.writeBit(0);                               // без custom_payload
+  body.bits.writeCoins(new TW.utils.BN(1));            // 1 нанотон: уведомление новому владельцу
+  body.bits.writeBit(0);                               // пустой forward_payload
+  const item = new TW.utils.Address(d.nft).toString(true, true, true, false);
+  return S.wallet.methods.transfer({ secretKey, toAddress: item, amount: TW.utils.toNano(NFT_GAS), seqno, payload: body, sendMode: 3 }).getQuery();
+}
+
+/* ---------- обмен через STON.fi (роутер v2) ---------- */
+const TON_STON = 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c';
+function swapTokens() {
+  const list = [{ id: 'TON', addr: TON_STON, symbol: 'TON', name: 'Toncoin', decimals: 9, balance: S.balance, logo: TON_LOGO }];
+  const seen = new Set();
+  for (const j of S.jettons) {
+    const raw = String(j.jetton.address).toLowerCase(); seen.add(raw);
+    const pop = POPULAR.find(t => t.id === raw), img = safeImg(j.jetton.image);
+    list.push({ id: raw, addr: pop?.friendly || friendly(raw, true), symbol: j.jetton.symbol, name: j.jetton.name, decimals: j.jetton.decimals ?? 9,
+      balance: Number(j.balance) / 10 ** (j.jetton.decimals ?? 9), units: j.balance, wallet: j.wallet_address?.address,
+      logo: pop?.logo ? pop.logo() : img ? `<img src="${img}" alt="">` : esc((j.jetton.symbol || '?')[0]) });
+  }
+  for (const t of POPULAR) if (!seen.has(t.id)) list.push({ id: t.id, addr: t.friendly, symbol: t.symbol, name: t.name, decimals: t.decimals, balance: 0,
+    logo: t.logo ? t.logo() : S.popImg[t.id] ? `<img src="${safeImg(S.popImg[t.id])}" alt="">` : esc(t.symbol[0]) });
+  return list;
+}
+async function stonSimulate(from, to, units, slippage) {
+  const q = new URLSearchParams({ offer_address: from.addr, ask_address: to.addr, units, slippage_tolerance: String(slippage), dex_version: '2' });
+  const r = await fetch('https://api.ston.fi/v1/swap/simulate?' + q, { method: 'POST' });
+  if (!r.ok) { let m = ''; try { m = (await r.json()).message || ''; } catch (e) {} throw new Error(m || 'HTTP ' + r.status); }
+  const j = await r.json();
+  if (j.router?.major_version !== 2) throw new Error('unsupported router');
+  return j;
+}
+function swapBody(sim, deadline) {
+  const C = TW.boc.Cell, A = x => new TW.utils.Address(x);
+  const extra = new C();
+  extra.bits.writeCoins(new TW.utils.BN(sim.min_ask_units));   // минимум с учётом проскальзывания
+  extra.bits.writeAddress(S.addrObj);                          // кто получает
+  extra.bits.writeCoins(new TW.utils.BN(0));                   // fwd_gas для custom_payload
+  extra.bits.writeBit(0);                                      // без custom_payload
+  extra.bits.writeCoins(new TW.utils.BN(0));                   // refund_fwd_gas
+  extra.bits.writeBit(0);                                      // без refund_payload
+  extra.bits.writeUint(10, 16);                                // ref_fee (без реферального адреса не взимается)
+  extra.bits.writeAddress(null);                               // реферальный адрес: нет
+  const b = new C();
+  b.bits.writeUint(0x6664de2a, 32);                            // swap
+  b.bits.writeAddress(A(sim.ask_jetton_wallet));               // кошелёк роутера для получаемой валюты
+  b.bits.writeAddress(S.addrObj);                              // возврат при ошибке
+  b.bits.writeAddress(S.addrObj);                              // сдача газа
+  b.bits.writeUint(deadline, 64);
+  b.refs.push(extra);
+  return b;
+}
+async function buildSwap(d, secretKey, seqno) {
+  const sim = d.sim, C = TW.boc.Cell, BN = TW.utils.BN;
+  const body = swapBody(sim, d.deadline);
+  if (d.from.id === 'TON') {
+    // TON -> токен: TON уходят на pTON-кошелёк роутера
+    const t = new C();
+    t.bits.writeUint(0x01f3835d, 32);                          // ton_transfer
+    t.bits.writeUint(0, 64);
+    t.bits.writeCoins(new BN(sim.offer_units));
+    t.bits.writeAddress(S.addrObj);                            // возврат при ошибке
+    t.bits.writeBit(1); t.refs.push(body);
+    const value = new BN(sim.offer_units).add(new BN(sim.gas_params.forward_gas));
+    return S.wallet.methods.transfer({ secretKey, toAddress: new TW.utils.Address(sim.offer_jetton_wallet).toString(true, true, true, false), amount: value, seqno, payload: t, sendMode: 3 }).getQuery();
+  }
+  // токен -> что угодно: перевод своих токенов на адрес роутера с forward_payload = swap
+  const jt = new C();
+  jt.bits.writeUint(0x0f8a7ea5, 32);
+  jt.bits.writeUint(0, 64);
+  jt.bits.writeCoins(new BN(sim.offer_units));
+  jt.bits.writeAddress(new TW.utils.Address(sim.router_address));
+  jt.bits.writeAddress(S.addrObj);
+  jt.bits.writeBit(0);
+  jt.bits.writeCoins(new BN(sim.gas_params.forward_gas));
+  jt.bits.writeBit(1); jt.refs.push(body);
+  const myWallet = new TW.utils.Address(d.from.wallet).toString(true, true, true, false);
+  return S.wallet.methods.transfer({ secretKey, toAddress: myWallet, amount: new BN(sim.gas_params.gas_budget), seqno, payload: jt, sendMode: 3 }).getQuery();
+}
+function unitsToNum(u, dec) { return Number(u) / 10 ** dec; }
+V.swap = () => {
+  const toks = swapTokens();
+  const st = S.swap || (S.swap = { from: 'TON', to: POPULAR[0].id, amount: '', slip: 0.01 });
+  const from = toks.find(t => t.id === st.from) || toks[0];
+  const to = toks.find(t => t.id === st.to && t.id !== from.id) || toks.find(t => t.id !== from.id);
+  st.from = from.id; st.to = to.id;
+  const pick = (which, cur) => `<div class="assets">${toks.filter(t => which === 'to' ? t.id !== from.id : true).map(t => `<button type="button" class="asset ${t.id === cur.id ? 'on' : ''}" data-${which}="${esc(t.id)}">
+      <span class="ico sm">${t.logo}</span><span><b>${esc(t.symbol)}</b><small>${fmt(t.balance)}</small></span></button>`).join('')}</div>`;
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <h2>Обмен</h2>
+    <div class="field"><small class="lbl">Отдаёшь · доступно ${fmt(from.balance, Math.min(from.decimals, 6))} ${esc(from.symbol)} <button type="button" id="b-max">всё</button></small>${pick('from', from)}</div>
+    <label class="field big"><input id="amt" inputmode="decimal" placeholder="0" value="${esc(st.amount)}"></label>
+    <button class="flip" id="b-flip" aria-label="Поменять местами">${ic('updown', 18)}</button>
+    <div class="field"><small class="lbl">Получаешь</small>${pick('to', to)}</div>
+    <div class="quote" id="quote"><div class="q-main">—</div></div>
+    <div class="field"><small class="lbl">Проскальзывание</small><div class="seg">${[0.005, 0.01, 0.03].map(v => `<button type="button" data-slip="${v}" class="${st.slip === v ? 'on' : ''}">${v * 100}%</button>`).join('')}</div></div>
+    <div class="err" id="err"></div>
+    <button class="btn primary" id="b-go" disabled>Обменять</button>
+    <p class="muted small">Обмен выполняет биржа STON.fi. Starlify не берёт комиссию</p>
+  </div>`;
+  let timer, seq = 0;
+  const quote = async () => {
+    const v = $('#amt').value.trim().replace(',', '.'); st.amount = v;
+    const re = new RegExp(`^\\d+(\\.\\d{1,${from.decimals}})?$`);
+    $('#err').textContent = ''; $('#b-go').disabled = true; S.swapSim = null;
+    if (!v || !re.test(v) || !(+v > 0)) { $('#quote').innerHTML = '<div class="q-main">Введи сумму</div>'; return; }
+    $('#quote').innerHTML = '<div class="q-main muted">Считаю курс…</div>';
+    const my = ++seq;
+    try {
+      const sim = await stonSimulate(from, to, toUnits(v, from.decimals).toString(), st.slip);
+      if (my !== seq || S.view !== 'swap') return;
+      const got = unitsToNum(sim.ask_units, to.decimals), min = unitsToNum(sim.min_ask_units, to.decimals);
+      const rate = got / +v, impact = Math.abs(Number(sim.price_impact) * 100);
+      const reserve = from.id === 'TON' ? unitsToNum(sim.gas_params.forward_gas, 9) : unitsToNum(sim.gas_params.gas_budget, 9);
+      const used = unitsToNum(sim.gas_params.estimated_gas_consumption, 9);
+      const dexFee = unitsToNum(sim.fee_units, to.decimals);
+      const needTon = (from.id === 'TON' ? +v : 0) + reserve + 0.01;
+      $('#quote').innerHTML = `<div class="q-main">≈ ${fmt(got, Math.min(to.decimals, 6))} ${esc(to.symbol)}</div>
+        <div class="sum">
+          <div><span>Курс</span><span>1 ${esc(from.symbol)} = ${fmt(rate, rate < 1 ? 6 : 4)} ${esc(to.symbol)}</span></div>
+          <div><span>Минимум к получению</span><span>${fmt(min, Math.min(to.decimals, 6))} ${esc(to.symbol)}</span></div>
+          <div><span>Влияние на цену</span><span class="${impact > 3 ? 'minus-red' : ''}">${fmt(impact, 2)}%</span></div>
+          <div><span>Комиссия биржи STON.fi</span><span>${fmt(Number(sim.fee_percent) * 100, 2)}% · ${fmt(dexFee, 6)} ${esc(to.symbol)}</span></div>
+          <div><span>Комиссия сети</span><span id="swgas">считаю…</span></div>
+          <div><span>Резерв на газ</span><span>${fmt(reserve, 2)} TON, неиспользованное вернётся</span></div>
+          <div><span>Комиссия Starlify</span><span>0</span></div>
+        </div>`;
+      // точная комиссия сети: эмуляция этого же обмена без подписи
+      const dl = Math.floor(Date.now() / 1000) + 15 * 60;
+      (from.id === 'TON' || from.wallet ? estimateFee({ kind: 'swap', sim, from, to, deadline: dl, attach: String((from.id === 'TON' ? +v : 0) + reserve) }) : Promise.reject())
+        .then(f => { if (my === seq && $('#swgas')) $('#swgas').textContent = `${fmt(f, 6)} TON` + (S.rate.uah ? ` (≈ ${fmt(f * S.rate.uah, 2)} ₴)` : ''); })
+        .catch(() => { if (my === seq && $('#swgas')) $('#swgas').textContent = `≈ ${fmt(used, 3)} TON по оценке STON.fi`; });
+      if (+v > from.balance) { $('#err').textContent = `Недостаточно ${from.symbol}: доступно ${fmt(from.balance, 6)}`; return; }
+      if (S.balance < needTon) { $('#err').textContent = `Нужно ${fmt(needTon, 3)} TON с учётом газа. Неиспользованный газ вернётся`; return; }
+      if (impact > 15) { $('#err').textContent = 'Слишком сильное влияние на цену: уменьши сумму'; return; }
+      S.swapSim = { sim, from, to, v, got, min, reserve, used };
+      $('#b-go').disabled = false;
+    } catch (e) {
+      if (my !== seq) return;
+      $('#quote').innerHTML = '<div class="q-main">—</div>';
+      $('#err').textContent = String(e.message).includes('unsupported') ? 'Для этой пары нет пула на STON.fi v2' : 'Обмен этой пары сейчас недоступен на STON.fi';
+    }
+  };
+  $('#amt').oninput = () => { clearTimeout(timer); timer = setTimeout(quote, 400); };
+  $('#b-back').onclick = () => render('home');
+  $('#b-max').onclick = () => {
+    const max = from.id === 'TON' ? Math.max(0, from.balance - 0.35) : from.balance;
+    $('#amt').value = from.id === 'TON' ? String(Math.floor(max * 1e4) / 1e4) : String(from.units ? Number(from.units) / 10 ** from.decimals : 0);
+    quote();
+  };
+  $('#b-flip').onclick = () => { [st.from, st.to] = [st.to, st.from]; st.amount = ''; render('swap'); };
+  app.querySelectorAll('[data-from]').forEach(b => b.onclick = () => { st.from = b.dataset.from; if (st.to === st.from) st.to = from.id; st.amount = ''; render('swap'); });
+  app.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { st.to = b.dataset.to; render('swap'); });
+  app.querySelectorAll('[data-slip]').forEach(b => b.onclick = () => { st.slip = +b.dataset.slip; app.querySelectorAll('[data-slip]').forEach(x => x.classList.toggle('on', x === b)); quote(); });
+  $('#b-go').onclick = () => {
+    const q = S.swapSim; if (!q) return;
+    const deadline = Math.floor(Date.now() / 1000) + 15 * 60;
+    S.draft = { kind: 'swap', sim: q.sim, from: q.from, to: q.to, deadline, attach: String((q.from.id === 'TON' ? +q.v : 0) + q.reserve),
+      doneText: `${q.v} ${q.from.symbol} → ≈ ${fmt(q.got, 6)} ${q.to.symbol}. Токены придут через несколько секунд` };
+    pinPad({
+      title: 'Подтверди обмен', sub: `${q.v} ${q.from.symbol} → ≈ ${fmt(q.got, 6)} ${q.to.symbol}`, throttle: true,
+      back: () => render('swap'),
+      check: async pin => {
+        let kp;
+        try { const w = await decryptWords(pin); kp = await MN.mnemonicToKeyPair(w); w.fill(''); } catch (e) { return false; }
+        sendNow(kp.secretKey); return true;
+      }
+    });
+  };
+  if (st.amount) quote();
+};
 
 function historyHtml(only, emptyText) {
   if (!S.loaded) return '<div class="empty">Загружаю…</div>';
@@ -870,6 +1271,8 @@ function toUnits(str, dec) {
   return new TW.utils.BN((i + f.padEnd(dec, '0').slice(0, dec)).replace(/^0+(?=\d)/, ''));
 }
 async function buildTransfer(d, secretKey, seqno) {
+  if (d.kind === 'nft') return buildNftTransfer(d, secretKey, seqno);
+  if (d.kind === 'swap') return buildSwap(d, secretKey, seqno);
   if (d.asset === 'TON') {
     return S.wallet.methods.transfer({
       secretKey, toAddress: d.to, amount: d.all ? 0 : TW.utils.toNano(d.amount),
@@ -922,7 +1325,7 @@ V.send = preset => {
     $('#amt').value = cur.id === 'TON' ? String(cur.balance) : (cur.units ? String(Number(cur.units) / 10 ** cur.decimals) : '0');
     all = cur.id === 'TON';
   };
-  $('#b-next').onclick = () => {
+  $('#b-next').onclick = async () => {
     const { to, comment } = keep(), amount = $('#amt').value.trim().replace(',', '.');
     const err = m => { $('#err').textContent = m; };
     if (!TW.utils.Address.isValid(to)) return err('Неверный адрес. Проверь, что это адрес в сети TON.');
@@ -937,7 +1340,16 @@ V.send = preset => {
       if (toUnits(amount, cur.decimals).gt(new TW.utils.BN(cur.units))) return err(`Недостаточно ${cur.symbol}.`);
       if (S.balance < +JETTON_GAS) return err(`Нужно хотя бы ${JETTON_GAS} TON на комиссию. Пополни TON.`);
     }
-    S.draft = { asset: cur.id, symbol: cur.symbol, to, amount, comment, all: all && cur.id === 'TON' && Number(amount) === cur.balance };
+    let dest = to, inactive = false;
+    if (cur.id === 'TON') {
+      // как в Tonkeeper: неактивному кошельку отправляем без возврата, иначе TON отскочит и комиссия пропадёт
+      $('#b-next').disabled = true;
+      try { const acc = await get(`/v2/accounts/${encodeURIComponent(to)}`); inactive = acc.status !== 'active'; }
+      catch (e) { inactive = String(e.message).includes('404'); }
+      $('#b-next').disabled = false;
+      if (inactive && A.isUserFriendly && A.isBounceable) dest = A.toString(true, true, false, S.net === 'testnet');
+    }
+    S.draft = { asset: cur.id, symbol: cur.symbol, to: dest, shown: to, inactive, amount, comment, all: all && cur.id === 'TON' && Number(amount) === cur.balance };
     render('confirmSend');
   };
 };
@@ -953,11 +1365,14 @@ V.confirmSend = () => {
       <p class="muted">${d.all ? 'весь баланс · ' : ''}на ${esc(short(d.to))}</p>
     </div>
     <div class="sum">
-      <div><span>Кому</span><span>${esc(d.to)}</span></div>
+      <div><span>Кому</span><span>${esc(d.shown || d.to)}</span></div>
+      ${d.inactive ? '<div><span>Получатель</span><span>ещё не активирован, отправим без возврата</span></div>' : ''}
       <div><span>${d.all ? 'Отправляешь' : 'Сумма'}</span><span>${d.all ? 'весь баланс, ' : ''}${esc(d.amount)} ${esc(d.symbol)}${isTon ? uah(+d.amount) : ''}</span></div>
       ${d.comment ? `<div><span>Комментарий</span><span>${esc(d.comment)}</span></div>` : ''}
       <div><span>Комиссия сети</span><span id="fee">считаю…</span></div>
+      ${isTon ? '' : `<div><span>Резерв на газ</span><span>${JETTON_GAS} TON, неиспользованное вернётся</span></div>`}
       <div><span>${d.all ? 'Получатель получит' : 'Всего спишется'}</span><span id="total">—</span></div>
+      <div><span>Комиссия Starlify</span><span>0 TON</span></div>
       <div><span>Сеть</span><span>${S.net}</span></div>
     </div>
     <div class="note">Переводы в блокчейне <b>нельзя отменить</b>. Проверь адрес ещё раз.</div>
@@ -973,7 +1388,7 @@ V.confirmSend = () => {
     else $('#total').textContent = `${esc(d.amount)} ${d.symbol} + ${fmt(fee, 6)} TON`;
     const need = isTon ? (d.all ? fee : +d.amount + fee) : Math.max(fee, +JETTON_GAS);
     if (need > S.balance) { $('#err').textContent = 'С учётом комиссии не хватает TON. Уменьши сумму или нажми «всё».'; $('#b-go').disabled = true; }
-  }).catch(() => { if (S.view === 'confirmSend') { $('#fee').textContent = isTon ? 'обычно 0.0005–0.005 TON' : 'обычно 0.002–0.02 TON'; $('#total').textContent = `${esc(d.amount)} ${esc(d.symbol)} + комиссия`; } });
+  }).catch(() => { if (S.view === 'confirmSend') { $('#fee').textContent = 'не удалось рассчитать, будет списана только плата сети'; $('#total').textContent = `${esc(d.amount)} ${esc(d.symbol)} + плата сети`; } });
   $('#b-go').onclick = () => pinPad({
     title: 'Подтверди перевод', sub: `${d.amount} ${d.symbol} → ${short(d.to)}`, throttle: true,
     back: () => render('confirmSend'),
@@ -996,7 +1411,7 @@ async function estimateFee(d) {
   const seqno = await getSeqno();
   const q = await buildTransfer(d, null, seqno);
   const boc = TW.utils.bytesToBase64(await q.toBoc(false));
-  const need = d.asset === 'TON' ? +d.amount : +JETTON_GAS;
+  const need = d.kind === 'nft' || d.kind === 'swap' ? +d.attach : d.asset === 'TON' ? +d.amount : +JETTON_GAS;
   const balance = Math.round((d.all ? S.balance : Math.max(S.balance, need + 1)) * 1e9);
   const r = await fetchRetry(api() + '/v2/wallet/emulate', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1032,14 +1447,14 @@ async function sendNow(secretKey) {
     }
     S.draft = null;
     app.innerHTML = `<div class="view status"><div class="big ${done ? 'ok-state' : ''}">${ic(done ? 'check' : 'clock', 36)}</div>
-      <h2>${done ? 'Отправлено' : 'Перевод отправлен в сеть'}</h2>
-      <p class="muted">${done ? `${esc(d.amount)} ${esc(d.symbol)} ушли на ${esc(short(d.to))}.` : 'Подтверждение задерживается. Проверь историю через минуту.'}</p>
+      <h2>${done ? (d.kind === 'swap' ? 'Обмен отправлен' : 'Отправлено') : 'Перевод отправлен в сеть'}</h2>
+      <p class="muted">${done ? (d.doneText ? esc(d.doneText) : `${esc(d.amount)} ${esc(d.symbol)} ушли на ${esc(short(d.shown || d.to))}`) : 'Подтверждение задерживается. Проверь историю через минуту'}</p>
       <button class="btn primary" id="b-home">К кошельку</button></div>`;
-    $('#b-home').onclick = () => { render('home'); refresh(); };
+    $('#b-home').onclick = () => { render('home'); refresh(); setTimeout(refresh, 12000); };
   } catch (e) {
     app.innerHTML = `<div class="view status"><div class="big fail">${ic('x', 36)}</div><h2>Не получилось</h2>
       <p class="muted">${esc(e.message || e)}</p><button class="btn primary" id="b-back">Назад</button></div>`;
-    $('#b-back').onclick = () => render('confirmSend');
+    $('#b-back').onclick = () => render(d.kind === 'nft' ? 'nftConfirm' : d.kind === 'swap' ? 'swap' : 'confirmSend');
   }
 }
 
@@ -1048,6 +1463,7 @@ V.settings = () => {
     <button class="back" id="b-back">${ic('back', 16)}Назад</button>
     <h2>Настройки</h2>
     <div class="list">
+      <button class="setting" id="b-wallets"><span>Кошельки</span><span class="setting-val">${esc(walletName())}${ic('chev', 16)}</span></button>
       <button class="setting" id="b-theme"><span>Оформление</span><span class="setting-val">${S.theme === 'gray' ? 'Серое' : 'Стандартное'}${ic('chev', 16)}</span></button>
       <button class="setting" id="b-phrase"><span>Показать секретную фразу</span>${ic('chev', 16)}</button>
       <button class="setting danger" id="b-del"><span>Удалить кошелёк с устройства</span>${ic('chev', 16)}</button>
@@ -1056,6 +1472,7 @@ V.settings = () => {
   </div>`;
   $('#b-back').onclick = () => render('home');
   $('#b-phrase').onclick = () => render('phrase');
+  $('#b-wallets').onclick = () => render('wallets');
   $('#b-del').onclick = () => render('reset');
   $('#b-theme').onclick = () => {
     S.theme = S.theme === 'gray' ? 'std' : 'gray';
@@ -1099,7 +1516,7 @@ if (!TW || !MN || !window.crypto?.subtle) {
   app.innerHTML = '<div class="view"><h2>Не удалось загрузить кошелёк</h2><p class="muted">Обнови страницу. Если не помогает, открой сайт в Chrome, Safari или Firefox по адресу https://…</p></div>';
   return;
 }
-if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet };
+if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet, buildTransfer, stonSimulate, swapTokens, getSeqno, estimateFee, readWallets, switchWallet };
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 const st0 = loadStore();
 if (!st0) render('welcome');

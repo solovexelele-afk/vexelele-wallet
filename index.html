@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https: data:; connect-src https://tonapi.io https://testnet.tonapi.io https://api.coingecko.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https: data:; connect-src https://tonapi.io https://testnet.tonapi.io https://api.coingecko.com https://api.ston.fi; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#141415">
 <link rel="manifest" href="manifest.json">
@@ -266,6 +266,53 @@
   [data-theme="std"] .tabs button.on{background:var(--acc-fill);color:#fff;box-shadow:none}
   [data-theme="std"] .dots i.on{background:var(--acc);border-color:var(--acc)}
 
+
+  /* ---------- несколько кошельков ---------- */
+  .wsw{display:flex;align-items:center;gap:4px;font-size:14px;font-weight:500;padding:4px 8px;margin-left:-8px;border-radius:8px;color:inherit;transition:background-color .15s var(--ease)}
+  .wsw:hover{background:rgba(255,255,255,.08)}
+  .wallets{display:flex;flex-direction:column;gap:8px}
+  .wrow{display:flex;align-items:center;border:1px solid var(--line);border-radius:14px;background:var(--card);transition:border-color .15s var(--ease)}
+  .wrow.on{border-color:var(--acc)}
+  .wpick{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:12px;text-align:left}
+  .wav{width:40px;height:40px;border-radius:12px;background:var(--raised);display:grid;place-items:center;font-weight:600;flex:none}
+  .wrow.on .wav{background:var(--acc-fill,#1677c9);color:#fff}
+  .wmid{flex:1;min-width:0}
+  .wmid b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wmid small{display:block;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .wbal{font-size:14px;color:var(--text2);white-space:nowrap}
+  .wedit{width:44px;align-self:stretch;display:grid;place-items:center;color:var(--muted);border-left:1px solid var(--line)}
+  .wedit:hover{color:var(--text)}
+
+  /* ---------- NFT ---------- */
+  button.nft{text-align:left;color:inherit;padding:0}
+  .list-head button{display:inline-flex;align-items:center;gap:4px}
+  .nft-big{border-radius:16px;overflow:hidden;background:var(--raised);aspect-ratio:1;display:grid;place-items:center;color:var(--muted);max-width:100%}
+  .nft-big img{width:100%;height:100%;object-fit:cover}
+  .nft-row{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:8px}
+  .nft-row b{display:block;font-weight:500}
+  .nft-row small{display:block;color:var(--muted);font-size:13px}
+  .nft-thumb{width:48px;height:48px;border-radius:10px;overflow:hidden;background:var(--raised);display:grid;place-items:center;color:var(--muted);flex:none}
+  .nft-thumb.lg{width:96px;height:96px;border-radius:16px}
+  .nft-thumb img{width:100%;height:100%;object-fit:cover}
+
+  /* ---------- обмен ---------- */
+  .flip{align-self:center;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--card);display:grid;place-items:center;color:var(--text2);margin:-8px 0;transition:background-color .15s var(--ease),transform .2s var(--ease)}
+  .flip:hover{background:var(--raised);transform:rotate(180deg)}
+  .quote{display:flex;flex-direction:column;gap:12px}
+  .q-main{font-size:24px;font-weight:500;letter-spacing:-.01em}
+  .q-main.muted{font-size:15px}
+  .seg{display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--card);border:1px solid var(--line)}
+  .seg button{flex:1;height:32px;border-radius:8px;font-size:14px;color:var(--text2)}
+  .seg button.on{background:var(--raised);color:var(--text)}
+  .minus-red{color:var(--down)}
+  p.small{font-size:12px;text-align:center}
+  .actions{grid-template-columns:repeat(4,1fr)}
+
+  /* ---------- заставка ---------- */
+  #splash{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:var(--bg)}
+  #splash svg{animation:pulse 1.2s var(--ease) infinite alternate}
+  @keyframes pulse{from{opacity:.55;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+
   @media (max-width:560px){
     main{padding-top:20px}
     h1{font-size:32px}
@@ -283,6 +330,7 @@
 <header class="top">
   <a href="./" class="logo"><svg class="emblem" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6.5" fill="#1677c9"/><g transform="rotate(-25 12 12)"><circle cx="12" cy="12" r="7.4" fill="#fff"/><path d="M12 4.6a3.7 3.7 0 0 0 0 7.4a3.7 3.7 0 0 1 0 7.4" fill="none" stroke="#1677c9" stroke-width="1.15"/></g></svg>Starlify <span class="muted">Wallet</span></a>
 </header>
+<div id="splash" aria-label="Загрузка"><svg width="64" height="64" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6.5" fill="#1677c9"/><g transform="rotate(-25 12 12)"><circle cx="12" cy="12" r="7.4" fill="#fff"/><path d="M12 4.6a3.7 3.7 0 0 0 0 7.4a3.7 3.7 0 0 1 0 7.4" fill="none" stroke="#1677c9" stroke-width="1.15"/></g></svg></div>
 <main id="app"></main>
 <div class="toast" id="toast"></div>
 
