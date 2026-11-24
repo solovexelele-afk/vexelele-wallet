@@ -1,12 +1,12 @@
 {
-  "name": "vexelele wallet",
-  "short_name": "vexelele",
-  "description": "Некастодиальный TON-кошелёк: TON, USDT, токены и NFT",
+  "name": "Starlify Wallet",
+  "short_name": "Starlify",
+  "description": "Starlify Wallet — некастодиальный TON-кошелёк: TON, USDT, токены и NFT",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0c0d0c",
-  "theme_color": "#0c0d0c",
+  "background_color": "#141415",
+  "theme_color": "#141415",
   "lang": "ru",
   "icons": [
     {
@@ -88,7 +88,7 @@
       "sizes": "1280x800",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Кошелёк на компьютере"
+      "label": "Starlify Wallet на компьютере"
     }
   ]
 }

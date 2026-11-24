@@ -1,9 +1,9 @@
-/* vexelele wallet — service worker.
+/* Starlify Wallet — service worker.
    Нужен, чтобы кошелёк ставился как приложение и открывался без интернета.
    Файлы приложения: сначала сеть (чтобы обновления приходили сразу), при её отсутствии — кэш.
    Запросы к TonAPI/CoinGecko не кэшируются никогда. */
-const CACHE = 'vxw-v3';
-const APP = ['./', 'index.html', 'wallet.js', 'fx.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'vxw-v6';
+const APP = ['./', 'index.html', 'wallet.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 const LIBS = [
   'https://cdn.jsdelivr.net/npm/tonweb@0.0.66/dist/tonweb.js',
   'https://cdn.jsdelivr.net/npm/tonweb-mnemonic@1.0.1/dist/web/index.js',
