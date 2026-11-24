@@ -891,7 +891,11 @@ if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, make
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 const st0 = loadStore();
 if (!st0) render('welcome');
-else if (st0.kind === 'pin' && st0.pub) openPublic().then(() => { render('home'); refresh(); }).catch(() => render('unlock'));
+else if (st0.kind === 'pin' && st0.pub) openPublic().then(() => {
+  // ярлыки приложения: ?action=send / ?action=receive
+  const act = new URLSearchParams(location.search).get('action');
+  render(act === 'send' ? 'send' : act === 'receive' ? 'receive' : 'home'); refresh();
+}).catch(() => render('unlock'));
 else render('unlock');   // старый кошелёк с паролем — один раз переводим на ПИН
 setInterval(() => { if (S.view === 'home' && S.raw) refresh(); }, 30000);
 })();

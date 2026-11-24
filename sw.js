@@ -2,7 +2,7 @@
    Нужен, чтобы кошелёк ставился как приложение и открывался без интернета.
    Файлы приложения: сначала сеть (чтобы обновления приходили сразу), при её отсутствии — кэш.
    Запросы к TonAPI/CoinGecko не кэшируются никогда. */
-const CACHE = 'vxw-v2';
+const CACHE = 'vxw-v3';
 const APP = ['./', 'index.html', 'wallet.js', 'fx.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 const LIBS = [
   'https://cdn.jsdelivr.net/npm/tonweb@0.0.66/dist/tonweb.js',

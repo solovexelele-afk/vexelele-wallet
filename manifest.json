@@ -31,5 +31,64 @@
   "id": "./",
   "categories": [
     "finance"
+  ],
+  "orientation": "any",
+  "dir": "ltr",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Отправить",
+      "short_name": "Отправить",
+      "description": "Отправить TON или USDT",
+      "url": "./?action=send",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Получить",
+      "short_name": "Получить",
+      "description": "Показать адрес и QR",
+      "url": "./?action=receive",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/phone-welcome.png",
+      "sizes": "780x1688",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Создай кошелёк за минуту"
+    },
+    {
+      "src": "screenshots/phone-home.png",
+      "sizes": "780x1688",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Баланс, токены, NFT и история"
+    },
+    {
+      "src": "screenshots/desktop-home.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Кошелёк на компьютере"
+    }
   ]
 }
