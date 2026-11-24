@@ -131,6 +131,13 @@ function saveWalletRecord(rec, replaceActive) {
   writeWallets(w);
 }
 function walletName() { return loadStore()?.name || 'Кошелёк'; }
+const STICKERS = ['💎', '🚀', '⭐', '🔥', '🐳', '🦊', '🐸', '🐱', '🐶', '🦄', '👑', '💰', '🎯', '🍀', '⚡', '🌙', '🎮', '🛍️', '🏦', '🔒', '🌊', '🍕', '❤️', '😎', '🐼', '🍩', '🎵', '🌈', '🧊'];
+const WCOLORS = ['#1677c9', '#7c5cff', '#e5484d', '#e8a23a', '#30a46c', '#3a3f47'];
+function walletAvatar(rec, size = 40) {
+  const bg = WCOLORS.includes(rec?.color) ? rec.color : '#3a3f47';
+  const st = STICKERS.includes(rec?.sticker) ? rec.sticker : null;
+  return `<span class="wav" style="width:${size}px;height:${size}px;background:${bg};font-size:${Math.round(size * (st ? 0.55 : 0.42))}px">${st || esc((rec?.name || 'К')[0].toUpperCase())}</span>`;
+}
 function resetWalletState() {
   forgetSecret();
   Object.assign(S, { wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [], nfts: [], loaded: false, updated: 0, rateAt: 0, draft: null });
@@ -652,11 +659,11 @@ V.wallets = async () => {
     <div class="wallets">${rows.map(({ rec, addr, bal }) => `
       <div class="wrow ${rec.id === w.active ? 'on' : ''}" data-id="${esc(rec.id)}">
         <button class="wpick" data-id="${esc(rec.id)}">
-          <span class="wav">${esc((rec.name || 'К')[0].toUpperCase())}</span>
+          ${walletAvatar(rec, 40)}
           <span class="wmid"><b>${esc(rec.name)}</b><small>${esc(short(addr))}${rec.ver ? ' · ' + (VER_NAME[rec.ver] || rec.ver) : ''}</small></span>
           <span class="wbal">${bal == null ? '' : S.hide ? '••••' : fmt(bal, 2) + ' TON'}</span>
         </button>
-        <button class="wedit" data-id="${esc(rec.id)}" aria-label="Переименовать">${ic('edit', 16)}</button>
+        <button class="wedit" data-id="${esc(rec.id)}" aria-label="Изменить">${ic('edit', 16)}</button>
       </div>`).join('')}
     </div>
     <button class="btn primary" id="b-newwallet">${ic('plus', 18)}Создать новый кошелёк</button>
@@ -670,16 +677,26 @@ V.wallets = async () => {
 };
 V.rename = id => {
   const w = readWallets(); const rec = w?.list.find(x => x.id === id); if (!rec) return render('wallets');
+  let sticker = rec.sticker || null, color = rec.color || WCOLORS[0];
   app.innerHTML = `<div class="view">
     <button class="back" id="b-back">${ic('back', 16)}Назад</button>
-    <h2>Название кошелька</h2>
-    <label class="field"><small class="lbl">Видно только тебе</small><input id="nm" maxlength="24" value="${esc(rec.name)}" autocomplete="off"></label>
+    <div class="rename-prev" id="prev"></div>
+    <label class="field"><small class="lbl">Название</small><input id="nm" maxlength="24" value="${esc(rec.name)}" autocomplete="off"></label>
+    <div class="field"><small class="lbl">Стикер</small><div class="stickers">
+      <button type="button" class="st ${!sticker ? 'on' : ''}" data-st="">Аа</button>
+      ${STICKERS.map(e => `<button type="button" class="st ${sticker === e ? 'on' : ''}" data-st="${e}">${e}</button>`).join('')}</div></div>
+    <div class="field"><small class="lbl">Цвет</small><div class="colors">${WCOLORS.map(c => `<button type="button" class="cl ${color === c ? 'on' : ''}" data-cl="${c}" style="background:${c}" aria-label="Цвет"></button>`).join('')}</div></div>
     <button class="btn primary" id="b-save">Сохранить</button>
   </div>`;
-  $('#nm').focus(); $('#nm').select();
+  const prev = () => { $('#prev').innerHTML = walletAvatar({ name: $('#nm').value || rec.name, sticker, color }, 72); };
+  prev();
+  $('#nm').oninput = prev;
+  app.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { sticker = b.dataset.st || null; app.querySelectorAll('[data-st]').forEach(x => x.classList.toggle('on', x === b)); prev(); });
+  app.querySelectorAll('[data-cl]').forEach(b => b.onclick = () => { color = b.dataset.cl; app.querySelectorAll('[data-cl]').forEach(x => x.classList.toggle('on', x === b)); prev(); });
   const save = () => {
     const v = $('#nm').value.trim().slice(0, 24); if (!v) return toast('Введи название');
-    const w2 = readWallets(); const r2 = w2.list.find(x => x.id === id); if (r2) { r2.name = v; writeWallets(w2); }
+    const w2 = readWallets(); const r2 = w2.list.find(x => x.id === id);
+    if (r2) { r2.name = v; r2.sticker = sticker; r2.color = color; writeWallets(w2); }
     render('wallets');
   };
   $('#b-back').onclick = () => render('wallets');
@@ -711,7 +728,7 @@ function renderHome() {
   app.innerHTML = `<div class="view">
     <div class="balance">
       <div class="bal-top">
-        <button class="wsw" id="b-wsw">${esc(walletName())}${ic('chevDown', 14)}</button>
+        <button class="wsw" id="b-wsw">${walletAvatar(loadStore(), 24)}${esc(walletName())}${ic('chevDown', 14)}</button>
         <span class="bal-tools"><button id="b-hide" aria-label="${S.hide ? 'Показать баланс' : 'Скрыть баланс'}">${ic(S.hide ? 'eyeOff' : 'eye', 16)}</button><button id="b-ref" aria-label="Обновить">${ic('refresh', 16)}</button></span>
       </div>
       <div class="amt">${S.hide && S.loaded ? '••••' : big}</div>
@@ -1011,7 +1028,7 @@ V.swap = () => {
       <span class="ico sm">${t.logo}</span><span><b>${esc(t.symbol)}</b><small>${fmt(t.balance)}</small></span></button>`).join('')}</div>`;
   app.innerHTML = `<div class="view">
     <button class="back" id="b-back">${ic('back', 16)}Назад</button>
-    <h2>Обмен</h2>
+    <h2 class="with-mark">${STAR(22)}Обмен</h2>
     <div class="field"><small class="lbl">Отдаёшь · доступно ${fmt(from.balance, Math.min(from.decimals, 6))} ${esc(from.symbol)} <button type="button" id="b-max">всё</button></small>${pick('from', from)}</div>
     <label class="field big"><input id="amt" inputmode="decimal" placeholder="0" value="${esc(st.amount)}"></label>
     <button class="flip" id="b-flip" aria-label="Поменять местами">${ic('updown', 18)}</button>
@@ -1020,7 +1037,6 @@ V.swap = () => {
     <div class="field"><small class="lbl">Проскальзывание</small><div class="seg">${[0.005, 0.01, 0.03].map(v => `<button type="button" data-slip="${v}" class="${st.slip === v ? 'on' : ''}">${v * 100}%</button>`).join('')}</div></div>
     <div class="err" id="err"></div>
     <button class="btn primary" id="b-go" disabled>Обменять</button>
-    <p class="muted small">Обмен выполняет биржа STON.fi. Starlify не берёт комиссию</p>
   </div>`;
   let timer, seq = 0;
   const quote = async () => {
@@ -1043,26 +1059,24 @@ V.swap = () => {
         <div class="sum">
           <div><span>Курс</span><span>1 ${esc(from.symbol)} = ${fmt(rate, rate < 1 ? 6 : 4)} ${esc(to.symbol)}</span></div>
           <div><span>Минимум к получению</span><span>${fmt(min, Math.min(to.decimals, 6))} ${esc(to.symbol)}</span></div>
-          <div><span>Влияние на цену</span><span class="${impact > 3 ? 'minus-red' : ''}">${fmt(impact, 2)}%</span></div>
-          <div><span>Комиссия биржи STON.fi</span><span>${fmt(Number(sim.fee_percent) * 100, 2)}% · ${fmt(dexFee, 6)} ${esc(to.symbol)}</span></div>
-          <div><span>Комиссия сети</span><span id="swgas">считаю…</span></div>
-          <div><span>Резерв на газ</span><span>${fmt(reserve, 2)} TON, неиспользованное вернётся</span></div>
-          <div><span>Комиссия Starlify</span><span>0</span></div>
+          ${impact > 1 ? `<div><span>Влияние на цену</span><span class="minus-red">${fmt(impact, 2)}%</span></div>` : ''}
+          <div><span>Комиссия обмена</span><span>${fmt(Number(sim.fee_percent) * 100, 2)}%</span></div>
+          <div><span>Комиссия сети</span><span id="swgas">…</span></div>
         </div>`;
       // точная комиссия сети: эмуляция этого же обмена без подписи
       const dl = Math.floor(Date.now() / 1000) + 15 * 60;
       (from.id === 'TON' || from.wallet ? estimateFee({ kind: 'swap', sim, from, to, deadline: dl, attach: String((from.id === 'TON' ? +v : 0) + reserve) }) : Promise.reject())
         .then(f => { if (my === seq && $('#swgas')) $('#swgas').textContent = `${fmt(f, 6)} TON` + (S.rate.uah ? ` (≈ ${fmt(f * S.rate.uah, 2)} ₴)` : ''); })
-        .catch(() => { if (my === seq && $('#swgas')) $('#swgas').textContent = `≈ ${fmt(used, 3)} TON по оценке STON.fi`; });
+        .catch(() => { if (my === seq && $('#swgas')) $('#swgas').textContent = `≈ ${fmt(used, 3)} TON`; });
       if (+v > from.balance) { $('#err').textContent = `Недостаточно ${from.symbol}: доступно ${fmt(from.balance, 6)}`; return; }
-      if (S.balance < needTon) { $('#err').textContent = `Нужно ${fmt(needTon, 3)} TON с учётом газа. Неиспользованный газ вернётся`; return; }
+      if (S.balance < needTon) { $('#err').textContent = `Нужно ${fmt(needTon, 3)} TON с учётом газа`; return; }
       if (impact > 15) { $('#err').textContent = 'Слишком сильное влияние на цену: уменьши сумму'; return; }
       S.swapSim = { sim, from, to, v, got, min, reserve, used };
       $('#b-go').disabled = false;
     } catch (e) {
       if (my !== seq) return;
       $('#quote').innerHTML = '<div class="q-main">—</div>';
-      $('#err').textContent = String(e.message).includes('unsupported') ? 'Для этой пары нет пула на STON.fi v2' : 'Обмен этой пары сейчас недоступен на STON.fi';
+      $('#err').textContent = 'Обмен этой пары сейчас недоступен';
     }
   };
   $('#amt').oninput = () => { clearTimeout(timer); timer = setTimeout(quote, 400); };
@@ -1294,62 +1308,119 @@ async function buildTransfer(d, secretKey, seqno) {
   return S.wallet.methods.transfer({ secretKey, toAddress: jw, amount: TW.utils.toNano(JETTON_GAS), seqno, payload: body, sendMode: 3 }).getQuery();
 }
 
+function assetLogo(x) {
+  if (x.id === 'TON') return TON_LOGO;
+  const pop = POPULAR.find(t => t.id === String(x.id).toLowerCase());
+  if (pop?.logo) return pop.logo();
+  return safeImg(x.image) ? `<img src="${safeImg(x.image)}" alt="">` : esc((x.symbol || '?')[0]);
+}
+function priceUsd(x) {
+  if (x.id === 'TON') return S.rate.usd || 0;
+  const j = S.jettons.find(z => z.jetton.address === x.id);
+  return j?.price?.prices?.USD || S.prices?.[String(x.id).toLowerCase()] || 0;
+}
 V.send = preset => {
   const d = S.draft || { asset: preset || 'TON' };
   const list = assets();
   const cur = list.find(x => x.id === d.asset) || list[0];
-  app.innerHTML = `<div class="view">
-    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
-    <h2>Отправить</h2>
-    <div class="field"><small class="lbl">Что отправить</small>
-      <div class="assets">${list.map(x => `<button type="button" class="asset ${x.id === cur.id ? 'on' : ''}" data-id="${esc(x.id)}">
-        <span class="ico sm">${safeImg(x.image) ? `<img src="${safeImg(x.image)}" alt="">` : x.id === 'TON' ? TON_LOGO : esc(x.symbol[0])}</span>
-        <span><b>${esc(x.symbol)}</b><small>${fmt(x.balance)}</small></span></button>`).join('')}</div>
+  const px = priceUsd(cur);
+  let fiat = !!d.fiat && px > 0;
+  app.innerHTML = `<div class="view sheet">
+    <div class="sheet-head">
+      <button class="round" id="b-back" aria-label="Назад">${ic('back', 18)}</button>
+      <h2>Отправить ${esc(cur.symbol)}</h2>
+      <button class="round" id="b-close" aria-label="Закрыть">${ic('x', 18)}</button>
     </div>
-    <label class="field"><small class="lbl">Адрес получателя <button type="button" id="b-paste">вставить</button></small><input id="to" value="${esc(d.to || '')}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="UQ… или EQ…"></label>
-    ${recents().length ? `<div class="recents"><small class="lbl">Недавние</small>${recents().map(r => `<button type="button" class="chip-btn" data-to="${esc(r.addr)}">${esc(r.name)}</button>`).join('')}</div>` : ''}
-    <label class="field big"><small class="lbl">Сумма, ${esc(cur.symbol)} · доступно ${fmt(cur.balance, cur.decimals)} <button type="button" id="b-max">всё</button></small><input id="amt" inputmode="decimal" value="${esc(d.amount || '')}" placeholder="0"></label>
-    <label class="field"><small class="lbl">Комментарий (необязательно, виден всем)</small><input id="cmt" value="${esc(d.comment || '')}" maxlength="120"></label>
-    ${cur.id !== 'TON' ? `<p class="muted">Для перевода ${esc(cur.symbol)} нужно ~${JETTON_GAS} TON на балансе. Реально спишется намного меньше, остальное сразу вернётся.</p>` : ''}
+    <div class="box addr">
+      <div class="box-main"><small>Адрес</small><textarea id="to" rows="1" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="UQ… или EQ…">${esc(d.to || '')}</textarea></div>
+      <button class="pill" id="b-paste" type="button">Вставить</button>
+    </div>
+    ${recents().length ? `<div class="recents">${recents().map(r => `<button type="button" class="chip-btn" data-to="${esc(r.addr)}">${esc(r.name)}</button>`).join('')}</div>` : ''}
+    <div class="box amount">
+      <div class="box-main"><small>Сумма</small><input id="amt" inputmode="decimal" placeholder="0" value="${esc(d.amountInput || d.amount || '')}"></div>
+      <button class="asset-pill" id="b-asset" type="button"><span class="ico sm">${assetLogo(cur)}</span><b>${esc(fiat ? 'USD' : cur.symbol)}</b>${ic('chevDown', 16)}</button>
+    </div>
+    <div class="under">
+      <button type="button" class="conv" id="b-conv" ${px ? '' : 'disabled'}><span id="conv">—</span>${px ? ic('updown', 14) : ''}</button>
+      <span class="left-max"><span id="left"></span> <button type="button" id="b-max">МАКС</button></span>
+    </div>
+    <div class="box"><div class="box-main"><input id="cmt" value="${esc(d.comment || '')}" maxlength="120" placeholder="Комментарий"></div></div>
     <div class="err" id="err"></div>
-    <button class="btn primary" id="b-next">Далее</button>
+    <div class="sheet-foot"><button class="btn primary" id="b-next" disabled>Продолжить</button></div>
+    <div class="picker" id="picker" hidden><div class="picker-card">
+      <div class="sheet-head"><span></span><h2>Валюта</h2><button class="round" id="b-pclose" aria-label="Закрыть">${ic('x', 18)}</button></div>
+      ${list.map(x => `<button type="button" class="item tap" data-pick="${esc(x.id)}"><div class="ico">${assetLogo(x)}</div>
+        <div class="mid"><b>${esc(x.name || x.symbol)}</b><small>${esc(x.symbol)}</small></div><div class="right">${fmt(x.balance, 4)}</div></button>`).join('')}
+    </div></div>
   </div>`;
   let all = !!d.all;
-  const keep = () => ({ to: $('#to').value.trim(), amount: $('#amt').value.trim(), comment: $('#cmt').value });
-  app.querySelectorAll('.asset').forEach(b => b.onclick = () => { S.draft = { ...keep(), amount: '', asset: b.dataset.id }; V.send(); });
-  $('#b-back').onclick = () => { S.draft = null; render('home'); };
-  $('#amt').oninput = () => { all = false; };
-  app.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { $('#to').value = b.dataset.to; $('#amt').focus(); });
-  $('#b-paste').onclick = async () => { try { $('#to').value = (await navigator.clipboard.readText()).trim(); } catch (e) { toast('Браузер не дал прочитать буфер. Вставь вручную'); } };
-  $('#b-max').onclick = () => {
-    $('#amt').value = cur.id === 'TON' ? String(cur.balance) : (cur.units ? String(Number(cur.units) / 10 ** cur.decimals) : '0');
-    all = cur.id === 'TON';
+  const ta = $('#to');
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+  grow(); ta.oninput = () => { grow(); check(); };
+  // сумма в токенах из поля ввода (поле может быть в USD)
+  const tokenAmount = () => {
+    const raw = $('#amt').value.trim().replace(',', '.');
+    if (!raw || !(+raw > 0)) return '';
+    if (!fiat) return raw;
+    const t = +raw / px; return String(Math.floor(t * 10 ** Math.min(cur.decimals, 9)) / 10 ** Math.min(cur.decimals, 9));
   };
+  const check = () => {
+    const amt = tokenAmount(), n = +amt || 0;
+    $('#conv').textContent = !px ? '' : fiat ? `${fmt(n, 6)} ${cur.symbol}` : `USD ${fmt(n * px, 2)}`;
+    const left = Math.max(0, cur.balance - n);
+    $('#left').textContent = `Останется: ${fmt(left, 6)} ${cur.symbol}`;
+    $('#left').classList.toggle('over', n > cur.balance);
+    $('#b-next').disabled = !(TW.utils.Address.isValid($('#to').value.trim()) && n > 0 && n <= cur.balance);
+  };
+  const keep = () => ({ to: $('#to').value.trim(), amountInput: $('#amt').value.trim(), comment: $('#cmt').value, fiat });
+  $('#amt').oninput = () => { all = false; check(); };
+  $('#b-back').onclick = () => { S.draft = null; render('home'); };
+  $('#b-close').onclick = () => { S.draft = null; render('home'); };
+  app.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { ta.value = b.dataset.to; grow(); check(); $('#amt').focus(); });
+  $('#b-paste').onclick = async () => { try { ta.value = (await navigator.clipboard.readText()).trim(); grow(); check(); } catch (e) { toast('Браузер не дал прочитать буфер. Вставь вручную'); } };
+  $('#b-asset').onclick = () => { $('#picker').hidden = false; };
+  $('#b-pclose').onclick = () => { $('#picker').hidden = true; };
+  app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { S.draft = { ...keep(), amountInput: '', fiat: false, asset: b.dataset.pick }; V.send(); });
+  $('#b-conv').onclick = () => {
+    if (!px) return;
+    const t = tokenAmount();
+    fiat = !fiat;
+    $('#amt').value = !t ? '' : fiat ? String(Math.round(+t * px * 100) / 100) : t;
+    $('#b-asset b').textContent = fiat ? 'USD' : cur.symbol;
+    check();
+  };
+  $('#b-max').onclick = () => {
+    const max = cur.id === 'TON' ? cur.balance : (cur.units ? Number(cur.units) / 10 ** cur.decimals : 0);
+    fiat = false; $('#b-asset b').textContent = cur.symbol;
+    $('#amt').value = String(max); all = cur.id === 'TON'; check();
+  };
+  check();
   $('#b-next').onclick = async () => {
-    const { to, comment } = keep(), amount = $('#amt').value.trim().replace(',', '.');
+    const to = $('#to').value.trim(), comment = $('#cmt').value, amount = tokenAmount();
     const err = m => { $('#err').textContent = m; };
-    if (!TW.utils.Address.isValid(to)) return err('Неверный адрес. Проверь, что это адрес в сети TON.');
+    if (!TW.utils.Address.isValid(to)) return err('Неверный адрес');
     const A = new TW.utils.Address(to);
-    if (A.isUserFriendly && A.isTestOnly !== (S.net === 'testnet')) return err(S.net === 'testnet' ? 'Это адрес основной сети, а кошелёк в тестовой.' : 'Это адрес тестовой сети. В основной сети на него отправлять нельзя.');
-    if (A.toString(false).toLowerCase() === S.raw) return err('Это твой собственный адрес.');
+    if (A.isUserFriendly && A.isTestOnly) return err('Это адрес тестовой сети');
+    if (A.toString(false).toLowerCase() === S.raw) return err('Это твой собственный адрес');
     const re = new RegExp(`^\\d+(\\.\\d{1,${cur.decimals}})?$`);
-    if (!re.test(amount) || !(Number(amount) > 0)) return err(`Введи сумму, например 1.5 (до ${cur.decimals} знаков после точки).`);
+    if (!re.test(amount) || !(Number(amount) > 0)) return err('Введи сумму');
     if (cur.id === 'TON') {
-      if (Number(amount) > cur.balance) return err('Недостаточно TON.');
+      if (Number(amount) > cur.balance) return err('Недостаточно TON');
     } else {
-      if (toUnits(amount, cur.decimals).gt(new TW.utils.BN(cur.units))) return err(`Недостаточно ${cur.symbol}.`);
-      if (S.balance < +JETTON_GAS) return err(`Нужно хотя бы ${JETTON_GAS} TON на комиссию. Пополни TON.`);
+      if (toUnits(amount, cur.decimals).gt(new TW.utils.BN(cur.units))) return err(`Недостаточно ${cur.symbol}`);
+      if (S.balance < +JETTON_GAS) return err(`Нужно ${JETTON_GAS} TON на газ, остаток вернётся`);
     }
     let dest = to, inactive = false;
     if (cur.id === 'TON') {
-      // как в Tonkeeper: неактивному кошельку отправляем без возврата, иначе TON отскочит и комиссия пропадёт
+      // неактивному кошельку отправляем без возврата, иначе TON отскочит и комиссия пропадёт
       $('#b-next').disabled = true;
       try { const acc = await get(`/v2/accounts/${encodeURIComponent(to)}`); inactive = acc.status !== 'active'; }
       catch (e) { inactive = String(e.message).includes('404'); }
       $('#b-next').disabled = false;
       if (inactive && A.isUserFriendly && A.isBounceable) dest = A.toString(true, true, false, S.net === 'testnet');
     }
-    S.draft = { asset: cur.id, symbol: cur.symbol, to: dest, shown: to, inactive, amount, comment, all: all && cur.id === 'TON' && Number(amount) === cur.balance };
+    S.draft = { asset: cur.id, symbol: cur.symbol, to: dest, shown: to, inactive, amount, amountInput: $('#amt').value.trim(), fiat, comment,
+      all: all && cur.id === 'TON' && Number(amount) === cur.balance };
     render('confirmSend');
   };
 };
@@ -1366,14 +1437,13 @@ V.confirmSend = () => {
     </div>
     <div class="sum">
       <div><span>Кому</span><span>${esc(d.shown || d.to)}</span></div>
-      ${d.inactive ? '<div><span>Получатель</span><span>ещё не активирован, отправим без возврата</span></div>' : ''}
+
       <div><span>${d.all ? 'Отправляешь' : 'Сумма'}</span><span>${d.all ? 'весь баланс, ' : ''}${esc(d.amount)} ${esc(d.symbol)}${isTon ? uah(+d.amount) : ''}</span></div>
       ${d.comment ? `<div><span>Комментарий</span><span>${esc(d.comment)}</span></div>` : ''}
       <div><span>Комиссия сети</span><span id="fee">считаю…</span></div>
-      ${isTon ? '' : `<div><span>Резерв на газ</span><span>${JETTON_GAS} TON, неиспользованное вернётся</span></div>`}
+
       <div><span>${d.all ? 'Получатель получит' : 'Всего спишется'}</span><span id="total">—</span></div>
-      <div><span>Комиссия Starlify</span><span>0 TON</span></div>
-      <div><span>Сеть</span><span>${S.net}</span></div>
+
     </div>
     <div class="note">Переводы в блокчейне <b>нельзя отменить</b>. Проверь адрес ещё раз.</div>
     <div class="err" id="err"></div>
