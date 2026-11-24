@@ -59,10 +59,11 @@ const IC = {
   activity: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
   key: '<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>',
   layers: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   percent: '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>'
 };
 const ic = (n, size = 18) => `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
-const STAR = (size = 16) => `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.94 5.96 6.56.95-4.75 4.63 1.12 6.54L12 17.5l-5.87 3.08 1.12-6.54L2.5 9.41l6.56-.95z"/></svg>`;
+const STAR = (size = 16) => `<svg class="emblem" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6.5" fill="#1677c9"/><g transform="rotate(-25 12 12)"><circle cx="12" cy="12" r="7.4" fill="#fff"/><path d="M12 4.6a3.7 3.7 0 0 0 0 7.4a3.7 3.7 0 0 1 0 7.4" fill="none" stroke="#1677c9" stroke-width="1.15"/></g></svg>`;
 const TON_LOGO = '<svg class="logo-ton" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28" fill="#0098EA"/><path fill="#fff" d="M37.56 15.63H18.44c-3.52 0-5.74 3.79-3.98 6.86l11.8 20.45a2 2 0 0 0 3.47 0l11.8-20.45c1.77-3.06-.46-6.86-3.97-6.86Zm-11.3 21.18-2.58-4.98-6.2-11.09a1.08 1.08 0 0 1 .95-1.62h7.82v17.69Zm12.25-16.07-6.2 11.1-2.57 4.97V19.12h7.82c.86 0 1.36.91.95 1.62Z"/></svg>';
 const USDT_LOGO = '<svg class="logo-ton" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28" fill="#26A17B"/><path fill="#fff" d="M31 25.3v-3.9h8.9v-5.9H16.1v5.9H25v3.9c-7.2.3-12.6 1.8-12.6 3.5s5.4 3.2 12.6 3.5v12.5h6V32.3c7.2-.3 12.6-1.8 12.6-3.5s-5.4-3.2-12.6-3.5Zm0 5.9c-.2 0-1.2.1-3 .1-1.5 0-2.6-.1-3-.1-6.4-.3-11.1-1.4-11.1-2.7s4.7-2.4 11.1-2.7v4.4c.4 0 1.6.1 3 .1 1.7 0 2.6-.1 3-.1v-4.4c6.4.3 11.1 1.4 11.1 2.7s-4.7 2.4-11.1 2.7Z"/></svg>';
 /* сумма: целая часть ярко, дробная приглушённо */
@@ -228,7 +229,13 @@ function loadCache() {
     return true;
   } catch (e) { return false; }
 }
-const paint = () => { if (S.view === 'home') renderHome(); };
+let lastSig = '';
+const paint = () => {
+  if (S.view !== 'home') return;
+  const sig = JSON.stringify([S.balance, S.rate, S.prices, S.jettons.map(j => j.balance + j.jetton.address), S.tab === 'history' ? S.events.length : 0, S.nfts.length, S.hide, S.hideZero, S.tab]);
+  if (sig === lastSig && document.querySelector('#app .balance')) { const a = document.getElementById('ago'); if (a) a.textContent = agoText(); return; }
+  lastSig = sig; renderHome();
+};
 
 async function refresh() {
   if (!S.raw || S.refreshing) return;
@@ -352,6 +359,7 @@ function pinPad(opts) {
 /* ---------- views ---------- */
 function render(view, arg) {
   S.view = view;
+  document.body.classList.remove('still');
   (V[view] || V.welcome)(arg);
   scrollTo(0, 0);
 }
@@ -566,6 +574,10 @@ function agoText() {
 }
 
 function renderHome() {
+  // повторная отрисовка того же экрана: без анимации и без прыжка прокрутки
+  const again = S.view === 'home' && !!document.querySelector('#app .balance');
+  const y = again ? scrollY : 0;
+  if (again) document.body.classList.add('still');
   const pf = portfolio(), test = S.net === 'testnet';
   const big = !S.loaded ? '…' : test || !pf.uah ? money(S.balance, 4, 'TON') : money(pf.uah, 2, '₴');
   const sub = !S.loaded ? '' : test ? 'тестовые TON, без стоимости' : `${fmt(S.balance)} TON · $${fmt(pf.usd, 2)}`;
@@ -573,7 +585,7 @@ function renderHome() {
   app.innerHTML = `<div class="view">
     <div class="balance">
       <div class="bal-top">
-        <span class="bal-brand">${STAR(14)}Всего на кошельке</span>
+        <span class="bal-brand">Всего на кошельке</span>
         <span class="bal-tools"><button id="b-hide" aria-label="${S.hide ? 'Показать баланс' : 'Скрыть баланс'}">${ic(S.hide ? 'eyeOff' : 'eye', 16)}</button><button id="b-ref" aria-label="Обновить">${ic('refresh', 16)}</button></span>
       </div>
       <div class="amt">${S.hide && S.loaded ? '••••' : big}</div>
@@ -585,7 +597,7 @@ function renderHome() {
       <button class="act" id="b-recv"><b>${ic('down', 20)}</b>Получить</button>
       <button class="act" id="b-set"><b>${ic('settings', 20)}</b>Настройки</button>
     </div>
-    <div class="tabs">${[['tokens', 'Активы'], ['nft', `NFT${S.nfts.length ? ' · ' + S.nfts.length : ''}`], ['history', 'История']]
+    <div class="tabs">${[['tokens', 'Активы'], ['nft', 'NFT'], ['history', 'История']]
       .map(([t, n]) => `<button data-t="${t}" class="${S.tab === t ? 'on' : ''}">${n}</button>`).join('')}</div>
     <div class="list" id="list"></div>
   </div>`;
@@ -596,11 +608,13 @@ function renderHome() {
   $('#b-hide').onclick = () => { S.hide = !S.hide; try { localStorage.setItem('vxw-hide', S.hide ? '1' : '0'); } catch (e) {} renderHome(); };
   $('#b-ref').onclick = async e => { e.currentTarget.classList.add('spinning'); await refresh(); };
   app.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { S.tab = b.dataset.t; renderHome(); });
+  if (S.tab === 'market') S.tab = 'tokens';
   $('#list').innerHTML = S.tab === 'tokens' ? tokensHtml() : S.tab === 'nft' ? nftHtml() : historyHtml();
+  if (again) scrollTo(0, y);
+  if (S.tab === 'tokens') loadMarket();
   app.querySelectorAll('.item.tap').forEach(el => el.onclick = () => {
     S.draft = null;
-    if (el.dataset.asset === 'recv' || (el.classList.contains('zero') && el.dataset.asset === 'TON')) render('receive');
-    else render('send', el.dataset.asset);
+    render('asset', el.dataset.asset);
   });
   const z = $('#b-zero');
   if (z) z.onclick = () => { S.hideZero = !S.hideZero; try { localStorage.setItem('vxw-hidezero', S.hideZero ? '1' : '0'); } catch (e) {} renderHome(); };
@@ -632,12 +646,37 @@ function tokensHtml() {
   if (!S.hideZero) for (const t of POPULAR) {
     if (held.has(t.id)) continue;
     const usd = S.prices?.[t.id];
-    rows.push(tokenRow({ asset: 'recv', logo: t.logo ? t.logo() : S.popImg[t.id] ? `<img src="${safeImg(S.popImg[t.id])}" alt="" loading="lazy">` : esc(t.symbol[0]), name: t.name, verified: true,
+    rows.push(tokenRow({ asset: t.id, logo: t.logo ? t.logo() : S.popImg[t.id] ? `<img src="${safeImg(S.popImg[t.id])}" alt="" loading="lazy">` : esc(t.symbol[0]), name: t.name, verified: true,
       sub: usd ? '$' + fmt(usd, usd < 0.01 ? 6 : 3) : esc(t.symbol), amount: 0, symbol: t.symbol, usdLine: '', zero: true }));
   }
   const visible = S.hideZero ? rows.filter(r => !r.includes(' zero"')) : rows;
   return `<div class="list-head"><span>Активы</span><button id="b-zero">${S.hideZero ? 'Показать нулевые' : 'Скрыть нулевые'}</button></div>`
-    + (visible.length ? visible.join('') : '<div class="empty">Пока пусто. Нажми «Получить», чтобы пополнить кошелёк</div>');
+    + (visible.length ? visible.join('') : '<div class="empty">Пока пусто. Нажми «Получить», чтобы пополнить кошелёк</div>')
+    + (S.hideZero ? '' : marketHtml());
+}
+
+/* ---------- рынок: курсы монет других сетей (только просмотр) ---------- */
+const MARKET_IDS = ['bitcoin', 'ethereum', 'solana', 'binancecoin', 'tron', 'dogecoin', 'litecoin'];
+S.market = (() => { try { return JSON.parse(localStorage.getItem('vxw-market')) || null; } catch (e) { return null; } })();
+async function loadMarket() {
+  if (S.market && Date.now() - S.market.at < 60000) return;
+  try {
+    const r = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${MARKET_IDS.join(',')}&price_change_percentage=24h`);
+    if (!r.ok) throw 0;
+    const list = (await r.json()).map(c => ({ id: c.id, name: c.name, symbol: String(c.symbol || '').toUpperCase(), image: c.image, price: c.current_price, ch: c.price_change_percentage_24h }));
+    list.sort((a, b) => MARKET_IDS.indexOf(a.id) - MARKET_IDS.indexOf(b.id));
+    S.market = { at: Date.now(), list };
+    try { localStorage.setItem('vxw-market', JSON.stringify(S.market)); } catch (e) {}
+    if (S.view === 'home' && S.tab === 'tokens') renderHome();
+  } catch (e) {}
+}
+function marketHtml() {
+  return (S.market?.list || []).map(c => {
+    const img = safeImg(c.image);
+    const ch = Number.isFinite(c.ch) ? ` <span class="chg ${c.ch >= 0 ? 'plus' : 'minus'}">${c.ch >= 0 ? '+' : '−'}${fmt(Math.abs(c.ch), 2)}%</span>` : '';
+    return tokenRow({ asset: 'mkt:' + c.id, logo: img ? `<img src="${img}" alt="" loading="lazy">` : esc(c.symbol[0] || '?'), name: c.name, verified: false,
+      sub: '$' + fmt(c.price, c.price < 1 ? 4 : 2) + ch, amount: 0, symbol: c.symbol, usdLine: '', zero: true });
+  }).join('');
 }
 
 function nftHtml() {
@@ -654,10 +693,11 @@ function nftHtml() {
   }).join('')}</div>`;
 }
 
-function historyHtml() {
+function historyHtml(only, emptyText) {
   if (!S.loaded) return '<div class="empty">Загружаю…</div>';
-  if (!S.events.length) return '<div class="empty">Пока нет операций. Нажми «Получить», чтобы пополнить кошелёк.</div>';
-  return S.events.map((e, idx) => {
+  const list = S.events.map((e, idx) => [e, idx]).filter(([e]) => !only || only(e));
+  if (!list.length) return `<div class="empty">${emptyText || 'Пока нет операций. Нажми «Получить», чтобы пополнить кошелёк'}</div>`;
+  return list.map(([e, idx]) => {
     const a = e.actions?.[0]; if (!a) return '';
     const when = new Date(e.timestamp * 1000).toLocaleString('ru', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     const pend = e.in_progress ? ' · в обработке' : '';
@@ -739,30 +779,80 @@ function recents() {
   return out;
 }
 
+/* ---------- экран актива ---------- */
+V.asset = id => {
+  id = String(id || 'TON');
+  const isTon = id === 'TON', isMkt = id.startsWith('mkt:');
+  const low = id.toLowerCase();
+  const j = !isTon && !isMkt ? S.jettons.find(x => String(x.jetton.address).toLowerCase() === low) : null;
+  const pop = POPULAR.find(t => t.id === low);
+  const mkt = isMkt ? (S.market?.list || []).find(c => 'mkt:' + c.id === id) : null;
+  const name = isTon ? 'Toncoin' : mkt ? mkt.name : j?.jetton.name || pop?.name || 'Токен';
+  const symbol = isTon ? 'TON' : mkt ? mkt.symbol : j?.jetton.symbol || pop?.symbol || '';
+  const dec = isTon ? 9 : j?.jetton.decimals ?? pop?.decimals ?? 9;
+  const bal = isTon ? S.balance : j ? Number(j.balance) / 10 ** dec : 0;
+  const price = isTon ? S.rate.usd : mkt ? mkt.price : j?.price?.prices?.USD ?? S.prices?.[pop?.id];
+  const change = isTon ? S.change24 : mkt ? mkt.ch : null;
+  const img = mkt ? safeImg(mkt.image) : j ? safeImg(j.jetton.image) : pop ? safeImg(S.popImg[pop.id]) : '';
+  const logo = isTon ? TON_LOGO : pop?.logo ? pop.logo() : img ? `<img src="${img}" alt="">` : esc(symbol[0] || '?');
+  const chg = Number.isFinite(change) && change != null ? ` <span class="chg ${change >= 0 ? 'plus' : 'minus'}">${change >= 0 ? '+' : '−'}${fmt(Math.abs(change), 2)}%</span>` : '';
+  const raw = j ? String(j.jetton.address).toLowerCase() : pop?.id;
+  const only = isTon ? e => e.actions?.[0]?.type === 'TonTransfer'
+    : isMkt ? () => false
+    : e => String(e.actions?.[0]?.JettonTransfer?.jetton?.address || '').toLowerCase() === raw;
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <div class="asset-head">
+      <div class="ico big">${logo}</div>
+      <small class="muted">${esc(name)}</small>
+      <div class="amt">${S.hide ? '••••' : money(bal, Math.min(dec, 4), symbol)}</div>
+      <div class="muted">${price ? (bal ? `≈ $${fmt(bal * price, 2)} · ` : '') + `1 ${esc(symbol)} = $${fmt(price, price < 0.01 ? 6 : price < 1 ? 4 : 2)}` : ''}${chg}</div>
+    </div>
+    <div class="actions two">
+      <button class="act primary" id="a-send"${isMkt || !bal ? ' disabled' : ''}><b>${ic('up', 20)}</b>Отправить</button>
+      <button class="act" id="a-recv"${isMkt ? ' disabled' : ''}><b>${ic('down', 20)}</b>Получить</button>
+    </div>
+    ${isMkt ? `<div class="note">${esc(name)} работает в своей сети. Starlify Wallet пока хранит только TON и токены сети TON, поэтому отправка и получение ${esc(symbol)} недоступны</div>` : ''}
+    <div class="list-head"><span>История ${esc(symbol)}</span></div>
+    <div class="list">${historyHtml(only, isMkt ? 'Истории нет' : `Операций с ${esc(symbol)} пока нет`)}</div>
+  </div>`;
+  $('#b-back').onclick = () => render('home');
+  $('#a-send').onclick = () => { S.draft = null; render('send', isTon ? 'TON' : j?.jetton.address); };
+  $('#a-recv').onclick = () => render('receive');
+  app.querySelectorAll('.item.ev').forEach(el => el.onclick = () => render('tx', S.events[+el.dataset.i]));
+};
+
 V.receive = () => {
   app.innerHTML = `<div class="view">
     <button class="back" id="b-back">${ic('back', 16)}Назад</button>
     <h2>Получить</h2>
-    <p class="muted">Отсканируй QR в другом кошельке или отправь адрес. Сюда можно присылать TON, USDT и любые токены сети TON${S.net === 'testnet' ? ' (только тестовая сеть!)' : ''}.</p>
+    <p class="muted">Отсканируй QR в другом кошельке или отправь адрес. Сюда приходят TON, USDT и любые токены сети TON</p>
     <div class="qr" id="qr"></div>
-    <div class="addr-full" id="addr">${esc(S.addr)}</div>
+    <button class="addr-box" id="b-copy" aria-label="Скопировать адрес">
+      <span class="addr-text">${esc(S.addr)}</span>
+      <span class="addr-act" id="copy-state">${ic('copy', 18)}<small>Копировать</small></span>
+    </button>
     <label class="field"><small class="lbl">Запросить сумму в TON (необязательно)</small><input id="amt" inputmode="decimal" placeholder="например 5"></label>
-    <div class="row"><button class="btn primary" id="b-copy">Скопировать адрес</button><button class="btn" id="b-link">Ссылка на оплату</button></div>
   </div>`;
-  const link = () => {
-    const v = $('#amt').value.trim().replace(',', '.');
-    return `ton://transfer/${S.addr}` + (/^\d+(\.\d{1,9})?$/.test(v) && +v > 0 ? `?amount=${TW.utils.toNano(v).toString()}` : '');
-  };
   const draw = () => {
     if (!window.qrcode) return;
-    const q = qrcode(0, 'M'); q.addData(link()); q.make();
+    const v = $('#amt').value.trim().replace(',', '.');
+    const data = `ton://transfer/${S.addr}` + (/^\d+(\.\d{1,9})?$/.test(v) && +v > 0 ? `?amount=${TW.utils.toNano(v).toString()}` : '');
+    const q = qrcode(0, 'M'); q.addData(data); q.make();
     $('#qr').innerHTML = q.createSvgTag({ cellSize: 8, margin: 0, scalable: true });
   };
   draw();
   $('#amt').oninput = draw;
   $('#b-back').onclick = () => render('home');
-  $('#b-copy').onclick = () => copy(S.addr, 'Адрес скопирован');
-  $('#b-link').onclick = () => copy(link().replace('ton://', 'https://app.tonkeeper.com/'), 'Ссылка скопирована');
+  let t;
+  $('#b-copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(S.addr); }
+    catch (e) { const a = document.createElement('textarea'); a.value = S.addr; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }
+    const st = $('#copy-state'); if (!st) return;
+    $('#b-copy').classList.add('done');
+    st.innerHTML = `${ic('check', 18)}<small>Скопировано</small>`;
+    clearTimeout(t); t = setTimeout(() => { const b = $('#b-copy'); if (!b) return; b.classList.remove('done'); $('#copy-state').innerHTML = `${ic('copy', 18)}<small>Копировать</small>`; }, 1600);
+  };
 };
 
 /* ---------- активы и переводы ---------- */
@@ -1016,6 +1106,7 @@ if (!st0) render('welcome');
 else if (st0.kind === 'pin' && st0.pub) openPublic().then(() => {
   // ярлыки приложения: ?action=send / ?action=receive
   const act = new URLSearchParams(location.search).get('action');
+  history.replaceState(null, '', location.pathname);
   render(act === 'send' ? 'send' : act === 'receive' ? 'receive' : 'home'); refresh();
 }).catch(() => render('unlock'));
 else render('unlock');   // старый кошелёк с паролем — один раз переводим на ПИН
