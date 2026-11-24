@@ -14,7 +14,8 @@ const S = {
   draft: null, newWords: null, nfts: [], change24: null, updated: 0,
   hide: (() => { try { return localStorage.getItem('vxw-hide') === '1'; } catch (e) { return false; } })()
 };
-const VERSIONS = ['v4R2', 'v3R2'];
+const VERSIONS = ['v5R1', 'v4R2', 'v3R2'];
+const VER_NAME = { v5R1: 'W5', v4R2: 'v4R2', v3R2: 'v3R2' };
 
 /* ---------- helpers ---------- */
 const $ = s => app.querySelector(s);
@@ -78,11 +79,71 @@ async function decryptWords(pass) {
   return td.decode(pt).split(' ');
 }
 
+/* ---------- W5 (wallet v5r1) ----------
+   Стандартный кошелёк Tonkeeper с 2024 года. В TonWeb его нет, поэтому собран здесь
+   по спецификации TON; код контракта взят из сети, хэш сверяется при запуске. */
+const W5_CODE = 'te6cckECFAEAAoEAART/APSkE/S88sgLAQIBIAINAgFIAwQC3NAg10nBIJFbj2Mg1wsfIIIQZXh0br0hghBzaW50vbCSXwPgghBleHRuuo60gCDXIQHQdNch+kAw+kT4KPpEMFi9kVvg7UTQgQFB1yH0BYMH9A5voTGRMOGAQNchcH/bPOAxINdJgQKAuZEw4HDiEA8CASAFDAIBIAYJAgFuBwgAGa3OdqJoQCDrkOuF/8AAGa8d9qJoQBDrkOuFj8ACAUgKCwAXsyX7UTQcdch1wsfgABGyYvtRNDXCgCAAGb5fD2omhAgKDrkPoCwBAvIOAR4g1wsfghBzaWduuvLgin8PAeaO8O2i7fshgwjXIgKDCNcjIIAg1yHTH9Mf0x/tRNDSANMfINMf0//XCgAK+QFAzPkQmiiUXwrbMeHywIffArNQB7Dy0IRRJbry4IVQNrry4Ib4I7vy0IgikvgA3gGkf8jKAMsfAc8Wye1UIJL4D95w2zzYEAP27aLt+wL0BCFukmwhjkwCIdc5MHCUIccAs44tAdcoIHYeQ2wg10nACPLgkyDXSsAC8uCTINcdBscSwgBSMLDy0InXTNc5MAGk6GwShAe78uCT10rAAPLgk+1V4tIAAcAAkVvg69csCBQgkXCWAdcsCBwS4lIQseMPINdKERITAJYB+kAB+kT4KPpEMFi68uCR7UTQgQFB1xj0BQSdf8jKAEAEgwf0U/Lgi44UA4MH9Fvy4Iwi1woAIW4Bs7Dy0JDiyFADzxYS9ADJ7VQAcjDXLAgkji0h8uCS0gDtRNDSAFETuvLQj1RQMJExnAGBAUDXIdcKAPLgjuLIygBYzxbJ7VST8sCN4gAQk1vbMeHXTNC01sNe';
+const W5_CODE_HASH = '20834b7b72b112147e1b2fb457b84e74d1a30f04f737d4f62a668e9552d2b72f';
+class W5Wallet {
+  constructor(publicKey, testnet) {
+    this.publicKey = publicKey;
+    this.walletId = testnet ? 2147483645 : 2147483409;   // network_id XOR context (workchain 0, subwallet 0)
+    this.code = TW.boc.Cell.oneFromBoc(TW.utils.base64ToBytes(W5_CODE));
+    const self = this;
+    this.methods = { transfer: p => ({ getQuery: () => self.transferQuery(p) }) };
+  }
+  data() {
+    const d = new TW.boc.Cell();
+    d.bits.writeBit(1); d.bits.writeUint(0, 32); d.bits.writeUint(this.walletId, 32);
+    d.bits.writeBytes(this.publicKey); d.bits.writeBit(0);
+    return d;
+  }
+  stateInit() {
+    const s = new TW.boc.Cell();
+    s.bits.writeBit(0); s.bits.writeBit(0);
+    s.bits.writeBit(1); s.refs.push(this.code);
+    s.bits.writeBit(1); s.refs.push(this.data());
+    s.bits.writeBit(0);
+    return s;
+  }
+  async getAddress() {
+    if (!this.addr) {
+      if (TW.utils.bytesToHex(await this.code.hash()) !== W5_CODE_HASH) throw new Error('W5 code hash mismatch');
+      this.addr = new TW.utils.Address('0:' + TW.utils.bytesToHex(await this.stateInit().hash()));
+    }
+    return this.addr;
+  }
+  async transferQuery({ secretKey, toAddress, amount, seqno, payload, sendMode }) {
+    const C = TW.boc.Cell;
+    // W5 принимает от внешних сообщений только режимы с флагом +2
+    const mode = sendMode === 128 ? 130 : (sendMode | 2);
+    const msg = TW.Contract.createOutMsg(toAddress, amount, payload || '', null);
+    const act = new C();
+    act.refs.push(new C());                               // предыдущий список действий (пусто)
+    act.bits.writeUint(0x0ec3c86d, 32); act.bits.writeUint(mode, 8); act.refs.push(msg);
+    const sm = new C();
+    sm.bits.writeUint(0x7369676e, 32);                    // "sign"
+    sm.bits.writeUint(this.walletId, 32);
+    sm.bits.writeUint(seqno === 0 ? 0xffffffff : Math.floor(Date.now() / 1000) + 60, 32);
+    sm.bits.writeUint(seqno, 32);
+    sm.bits.writeBit(1); sm.refs.push(act);
+    sm.bits.writeBit(0);
+    const sig = secretKey ? TW.utils.nacl.sign.detached(await sm.hash(), secretKey) : new Uint8Array(64);
+    const body = new C(); body.writeCell(sm); body.bits.writeBytes(sig);
+    const addr = await this.getAddress();
+    return TW.Contract.createCommonMsgInfo(TW.Contract.createExternalMessageHeader(addr), seqno === 0 ? this.stateInit() : null, body);
+  }
+}
+function makeWallet(ver, publicKey) {
+  return ver === 'v5R1' ? new W5Wallet(publicKey, S.net === 'testnet')
+    : new TW.Wallets.all[ver](new TW.HttpProvider(), { publicKey, wc: 0 });
+}
+
 /* ---------- wallet ---------- */
 async function openWallet(words, ver) {
   ver = VERSIONS.includes(ver) ? ver : (loadStore()?.ver || 'v4R2');
   const kp = await MN.mnemonicToKeyPair(words);
-  const w = new TW.Wallets.all[ver](new TW.HttpProvider(), { publicKey: kp.publicKey, wc: 0 });
+  const w = makeWallet(ver, kp.publicKey);
   S.ver = ver;
   const a = await w.getAddress();
   S.keyPair = kp; S.wallet = w; S.addrObj = a;
@@ -135,14 +196,14 @@ async function detectVersion(words) {
   try {
     const kp = await MN.mnemonicToKeyPair(words);
     const found = await Promise.all(VERSIONS.map(async v => {
-      const a = await new TW.Wallets.all[v](new TW.HttpProvider(), { publicKey: kp.publicKey, wc: 0 }).getAddress();
+      const a = await makeWallet(v, kp.publicKey).getAddress();
       try { const acc = await get(`/v2/accounts/${encodeURIComponent(a.toString(false))}`); return { v, bal: Number(acc.balance), active: acc.status === 'active' }; }
       catch (e) { return { v, bal: 0, active: false }; }
     }));
     kp.secretKey.fill(0);
     found.sort((a, b) => (b.active - a.active) || (b.bal - a.bal));
-    return found[0].active || found[0].bal > 0 ? found[0].v : 'v4R2';
-  } catch (e) { return 'v4R2'; }
+    return found[0].active || found[0].bal > 0 ? found[0].v : 'v5R1';
+  } catch (e) { return 'v5R1'; }
 }
 
 /* ---------- views ---------- */
@@ -166,7 +227,7 @@ V.welcome = () => {
   </div>`;
   $('#b-new').onclick = async () => { S.newWords = await MN.generateMnemonic(); render('create'); };
   $('#b-imp').onclick = () => render('import');
-  $('#b-net').onclick = () => { switchNet(); render('welcome'); };
+  $('#b-net').onclick = async () => { await switchNet(); render('welcome'); };
 };
 
 V.create = () => {
@@ -204,7 +265,7 @@ V.confirm = () => {
   $('#b-ok').onclick = () => {
     const ok = [...app.querySelectorAll('input[data-i]')].every(inp => inp.value.trim().toLowerCase() === S.newWords[+inp.dataset.i]);
     if (!ok) { $('#err').textContent = 'Слова не совпадают. Проверь, что записал(а) фразу правильно.'; return; }
-    render('setpass', { words: S.newWords, ver: 'v4R2' });
+    render('setpass', { words: S.newWords, ver: 'v5R1' });
   };
 };
 
@@ -216,7 +277,7 @@ V.import = () => {
     <label class="field"><small class="lbl">Секретная фраза</small><textarea id="words" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="word1 word2 … word24"></textarea></label>
     <div class="err" id="err"></div>
     <button class="btn primary" id="b-ok">Продолжить</button>
-    <p class="muted" style="font-size:13px">Поддерживаются кошельки версий v4R2 и v3R2 (Tonkeeper, Tonhub, MyTonWallet до 2024 года). Кошельки W5 пока не поддерживаются.</p>
+    <p class="muted" style="font-size:13px">Подходят кошельки Tonkeeper, MyTonWallet, Tonhub и других: новые W5 и старые v4R2, v3R2. Версия определится сама по балансу.</p>
   </div>`;
   $('#b-back').onclick = () => render('welcome');
   $('#b-ok').onclick = async () => {
@@ -231,7 +292,7 @@ V.import = () => {
 };
 
 V.setpass = arg => {
-  const words = Array.isArray(arg) ? arg : arg.words, ver = Array.isArray(arg) ? 'v4R2' : arg.ver;
+  const words = Array.isArray(arg) ? arg : arg.words, ver = Array.isArray(arg) ? 'v5R1' : arg.ver;
   app.innerHTML = `<div class="view">
     <h2>Пароль</h2>
     <p class="muted">Пароль защищает фразу в этом браузере. Он понадобится, чтобы открыть кошелёк и подтвердить перевод.</p>
@@ -672,10 +733,10 @@ V.settings = () => {
       <button class="setting" id="b-lock"><span>Заблокировать</span><span class="muted">→</span></button>
       <button class="setting" id="b-del"><span style="color:var(--down)">Удалить кошелёк с устройства</span><span class="muted">→</span></button>
     </div>
-    <p class="muted" style="font-size:13px">Кошелёк автоматически блокируется через 15 минут без действий. Тип кошелька: ${S.ver || 'v4R2'}.</p>
+    <p class="muted" style="font-size:13px">Кошелёк автоматически блокируется через 15 минут без действий. Тип кошелька: ${VER_NAME[S.ver] || S.ver}.</p>
   </div>`;
   $('#b-back').onclick = () => render('home');
-  $('#b-net').onclick = () => { switchNet(); render('settings'); refresh(); };
+  $('#b-net').onclick = async () => { await switchNet(); render('settings'); refresh(); };
   $('#b-phrase').onclick = () => render('phrase');
   $('#b-lock').onclick = lock;
   $('#b-del').onclick = () => render('reset');
@@ -704,9 +765,10 @@ V.phrase = () => {
   };
 };
 
-function switchNet() {
+async function switchNet() {
   S.net = S.net === 'testnet' ? 'mainnet' : 'testnet';
   try { localStorage.setItem(NET, S.net); } catch (e) {}
+  if (S.keyPair && S.ver === 'v5R1') { S.wallet = makeWallet(S.ver, S.keyPair.publicKey); S.addrObj = await S.wallet.getAddress(); }
   if (S.addrObj) setAddr();
   S.balance = 0; S.jettons = []; S.events = []; S.loaded = false;
 }
@@ -716,7 +778,7 @@ if (!TW || !MN || !window.crypto?.subtle) {
   app.innerHTML = '<div class="view"><h2>Не удалось загрузить кошелёк</h2><p class="muted">Обнови страницу. Если не помогает, открой сайт в Chrome, Safari или Firefox по адресу https://…</p></div>';
   return;
 }
-if (location.hostname === 'localhost') window.__vxw = { S, refresh, render };
+if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet };
 render(loadStore() ? 'unlock' : 'welcome');
 setInterval(() => { if (S.view === 'home' && S.keyPair) refresh(); }, 30000);
 })();
