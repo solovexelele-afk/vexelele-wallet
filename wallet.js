@@ -278,6 +278,36 @@ function render(view, arg) {
 }
 const V = {};
 
+/* ---------- установка как приложение ---------- */
+let installEvt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
+addEventListener('appinstalled', () => { installEvt = null; toast('Приложение установлено ✓'); });
+const installBtn = () => isStandalone() ? '' : '<button class="btn" id="b-install">⤓ Установить приложение на ПК или телефон</button>';
+function bindInstall() {
+  const b = $('#b-install'); if (!b) return;
+  b.onclick = async () => {
+    if (installEvt) { installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; }
+    else render('install');
+  };
+}
+V.install = () => {
+  const back = S.raw ? 'settings' : 'welcome';
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">← назад</button>
+    <h2>Установить приложение</h2>
+    <p class="muted">Кошелёк ставится как обычное приложение: своя иконка, отдельное окно, без адресной строки. Скачивать ничего не нужно.</p>
+    <div class="sum">
+      <div><span>${isIOS ? '<b style="color:var(--acc)">iPhone / iPad</b>' : 'iPhone / iPad'}</span><span>Открой сайт в Safari → кнопка «Поделиться» □↑ → «На экран „Домой“»</span></div>
+      <div><span>Android</span><span>Chrome → меню ⋮ → «Установить приложение» (или «Добавить на главный экран»)</span></div>
+      <div><span>Windows / Mac</span><span>Chrome или Edge → значок ⊕ справа в адресной строке, или меню ⋮ → «Установить vexelele wallet»</span></div>
+    </div>
+    <p class="muted" style="font-size:13px">Кошелёк в приложении тот же, что и в браузере на этом устройстве: ничего переносить не нужно.</p>
+  </div>`;
+  $('#b-back').onclick = () => render(back);
+};
+
 V.welcome = () => {
   app.innerHTML = `<div class="view">
     <h1>Твой TON.<br><span>Твои ключи.</span></h1>
@@ -286,7 +316,9 @@ V.welcome = () => {
     <button class="btn" id="b-imp">У меня уже есть кошелёк</button>
     <div class="note">Совет: сначала попробуй в <b>тестовой сети</b> (Настройки → Тестовая сеть), там TON бесплатные.</div>
     <button class="btn" id="b-net">${S.net === 'testnet' ? 'Перейти в основную сеть' : 'Включить тестовую сеть'}</button>
+    ${installBtn()}
   </div>`;
+  bindInstall();
   $('#b-new').onclick = async () => { S.newWords = await MN.generateMnemonic(); render('create'); };
   $('#b-imp').onclick = () => render('import');
   $('#b-net').onclick = async () => { await switchNet(); render('welcome'); };
@@ -811,6 +843,7 @@ V.settings = () => {
     <div class="list">
       <button class="setting" id="b-net"><span>Тестовая сеть</span><span class="switch ${S.net === 'testnet' ? 'on' : ''}"></span></button>
       <button class="setting" id="b-phrase"><span>Показать секретную фразу</span><span class="muted">→</span></button>
+      ${isStandalone() ? '' : '<button class="setting" id="b-install"><span>Установить приложение</span><span class="muted">→</span></button>'}
       <button class="setting" id="b-del"><span style="color:var(--down)">Удалить кошелёк с устройства</span><span class="muted">→</span></button>
     </div>
     <p class="muted" style="font-size:13px">ПИН-код спрашивается только при отправке и при показе секретной фразы. Тип кошелька: ${VER_NAME[S.ver] || S.ver}.</p>
@@ -819,6 +852,7 @@ V.settings = () => {
   $('#b-net').onclick = async () => { await switchNet(); render('settings'); refresh(); };
   $('#b-phrase').onclick = () => render('phrase');
   $('#b-del').onclick = () => render('reset');
+  bindInstall();
 };
 
 V.phrase = () => pinPad({
@@ -854,6 +888,7 @@ if (!TW || !MN || !window.crypto?.subtle) {
   return;
 }
 if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet };
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 const st0 = loadStore();
 if (!st0) render('welcome');
 else if (st0.kind === 'pin' && st0.pub) openPublic().then(() => { render('home'); refresh(); }).catch(() => render('unlock'));

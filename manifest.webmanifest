@@ -1,7 +1,7 @@
 {
   "name": "vexelele wallet",
   "short_name": "vexelele",
-  "description": "TON-кошелёк: TON, USDT, токены и NFT",
+  "description": "Некастодиальный TON-кошелёк: TON, USDT, токены и NFT",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -9,7 +9,27 @@
   "theme_color": "#0c0d0c",
   "lang": "ru",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "id": "./",
+  "categories": [
+    "finance"
   ]
 }
