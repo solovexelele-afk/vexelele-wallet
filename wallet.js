@@ -146,9 +146,19 @@ async function openWallet(words, ver) {
   const w = makeWallet(ver, kp.publicKey);
   S.ver = ver;
   const a = await w.getAddress();
-  S.keyPair = kp; S.wallet = w; S.addrObj = a;
+  S.keyPair = kp; S.pub = kp.publicKey; S.wallet = w; S.addrObj = a;
   setAddr();
 }
+/* Обычное открытие: только публичный ключ, секретный ключ не расшифровывается */
+async function openPublic() {
+  const st = loadStore();
+  S.ver = st.ver || 'v4R2';
+  S.pub = TW.utils.hexToBytes(st.pub);
+  S.wallet = makeWallet(S.ver, S.pub);
+  S.addrObj = await S.wallet.getAddress();
+  setAddr();
+}
+function forgetSecret() { if (S.keyPair) S.keyPair.secretKey.fill(0); S.keyPair = null; }
 function setAddr() {
   S.raw = S.addrObj.toString(false).toLowerCase();
   S.addr = S.addrObj.toString(true, true, false, S.net === 'testnet');
@@ -360,8 +370,8 @@ V.setpass = arg => {
           try { localStorage.setItem(STORE, JSON.stringify(enc)); }
           catch (e) { return 'Браузер не даёт сохранить данные (приватный режим?)'; }
           setAttempts({ n: 0, until: 0 });
-          words.fill(''); S.newWords = null;
-          bumpIdle(); render('home'); refresh(); toast('ПИН-код установлен ✓');
+          words.fill(''); S.newWords = null; forgetSecret();
+          render('home'); refresh(); toast('ПИН-код установлен ✓');
           return true;
         }
       });
@@ -379,7 +389,7 @@ V.unlock = () => {
       check: async pin => {
         let w;
         try { w = await decryptWords(pin); } catch (e) { return false; }
-        await openWallet(w); bumpIdle(); render('home'); refresh();
+        await openWallet(w); forgetSecret(); render('home'); refresh();
         return true;
       }
     });
@@ -412,11 +422,11 @@ V.reset = () => {
     <label class="field"><small class="lbl">Напиши «удалить», чтобы подтвердить</small><input id="c" autocomplete="off"></label>
     <button class="btn danger" id="b-del">Удалить из браузера</button>
   </div>`;
-  $('#b-back').onclick = () => render(S.keyPair ? 'settings' : 'unlock');
+  $('#b-back').onclick = () => render(S.raw ? 'settings' : (loadStore() ? 'unlock' : 'welcome'));
   $('#b-del').onclick = () => {
     if ($('#c').value.trim().toLowerCase() !== 'удалить') { toast('Напиши «удалить»'); return; }
     try { localStorage.removeItem(STORE); localStorage.removeItem(ATT); } catch (e) {}
-    if (S.keyPair) S.keyPair.secretKey.fill(0);
+    forgetSecret(); S.pub = null;
     Object.assign(S, { keyPair: null, wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [] });
     render('welcome');
   };
@@ -728,7 +738,11 @@ V.confirmSend = () => {
   $('#b-go').onclick = () => pinPad({
     title: 'Подтверди перевод', sub: `${d.amount} ${d.symbol} → ${short(d.to)}`, throttle: true,
     back: () => render('confirmSend'),
-    check: async pin => { try { await decryptWords(pin); } catch (e) { return false; } sendNow(); return true; }
+    check: async pin => {
+      let kp;
+      try { const w = await decryptWords(pin); kp = await MN.mnemonicToKeyPair(w); w.fill(''); } catch (e) { return false; }
+      sendNow(kp.secretKey); return true;
+    }
   });
 };
 
@@ -758,14 +772,15 @@ async function estimateFee(d) {
   return Math.max(0, -extra) / 1e9;
 }
 
-async function sendNow() {
+async function sendNow(secretKey) {
   const d = S.draft;
   app.innerHTML = `<div class="view status"><div class="spin"></div><h2>Отправляю…</h2><p class="muted" id="st">Подписываю перевод</p></div>`;
   const st = m => { const el = document.getElementById('st'); if (el) el.textContent = m; };
   try {
     const raw = encodeURIComponent(S.raw);
     const seqno = await getSeqno();
-    const cell = await buildTransfer(d, S.keyPair.secretKey, seqno);
+    const cell = await buildTransfer(d, secretKey, seqno);
+    secretKey.fill(0);
     const boc = TW.utils.bytesToBase64(await cell.toBoc(false));
     st('Отправляю в сеть');
     const r = await fetchRetry(api() + '/v2/blockchain/message', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boc }) });
@@ -796,15 +811,13 @@ V.settings = () => {
     <div class="list">
       <button class="setting" id="b-net"><span>Тестовая сеть</span><span class="switch ${S.net === 'testnet' ? 'on' : ''}"></span></button>
       <button class="setting" id="b-phrase"><span>Показать секретную фразу</span><span class="muted">→</span></button>
-      <button class="setting" id="b-lock"><span>Заблокировать</span><span class="muted">→</span></button>
       <button class="setting" id="b-del"><span style="color:var(--down)">Удалить кошелёк с устройства</span><span class="muted">→</span></button>
     </div>
-    <p class="muted" style="font-size:13px">Кошелёк автоматически блокируется через 15 минут без действий. Тип кошелька: ${VER_NAME[S.ver] || S.ver}.</p>
+    <p class="muted" style="font-size:13px">ПИН-код спрашивается только при отправке и при показе секретной фразы. Тип кошелька: ${VER_NAME[S.ver] || S.ver}.</p>
   </div>`;
   $('#b-back').onclick = () => render('home');
   $('#b-net').onclick = async () => { await switchNet(); render('settings'); refresh(); };
   $('#b-phrase').onclick = () => render('phrase');
-  $('#b-lock').onclick = lock;
   $('#b-del').onclick = () => render('reset');
 };
 
@@ -830,7 +843,7 @@ function showPhrase(w) {
 async function switchNet() {
   S.net = S.net === 'testnet' ? 'mainnet' : 'testnet';
   try { localStorage.setItem(NET, S.net); } catch (e) {}
-  if (S.keyPair && S.ver === 'v5R1') { S.wallet = makeWallet(S.ver, S.keyPair.publicKey); S.addrObj = await S.wallet.getAddress(); }
+  if (S.pub && S.ver === 'v5R1') { S.wallet = makeWallet(S.ver, S.pub); S.addrObj = await S.wallet.getAddress(); }
   if (S.addrObj) setAddr();
   S.balance = 0; S.jettons = []; S.events = []; S.loaded = false;
 }
@@ -841,6 +854,9 @@ if (!TW || !MN || !window.crypto?.subtle) {
   return;
 }
 if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet };
-render(loadStore() ? 'unlock' : 'welcome');
-setInterval(() => { if (S.view === 'home' && S.keyPair) refresh(); }, 30000);
+const st0 = loadStore();
+if (!st0) render('welcome');
+else if (st0.kind === 'pin' && st0.pub) openPublic().then(() => { render('home'); refresh(); }).catch(() => render('unlock'));
+else render('unlock');   // старый кошелёк с паролем — один раз переводим на ПИН
+setInterval(() => { if (S.view === 'home' && S.raw) refresh(); }, 30000);
 })();
