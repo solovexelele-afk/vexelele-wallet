@@ -30,6 +30,8 @@ const b64 = u8 => btoa(String.fromCharCode(...u8));
 const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const short = a => a ? a.slice(0, 6) + '…' + a.slice(-6) : '';
 const fmt = (n, d = 4) => (+n).toLocaleString('ru', { maximumFractionDigits: d });
+// мелкие суммы не округляем до нуля: 0,00000001 TON показывается как есть
+const fmtAmt = (n, maxDec = 9) => { const a = Math.abs(+n); return fmt(n, a === 0 ? 0 : a >= 1 ? 4 : a >= 0.0001 ? 6 : maxDec); };
 const api = () => S.net === 'testnet' ? 'https://testnet.tonapi.io' : 'https://tonapi.io';
 let tt;
 function toast(msg) {
@@ -76,7 +78,7 @@ const TON_LOGO = '<svg class="logo-ton" viewBox="0 0 56 56" aria-hidden="true"><
 const USDT_LOGO = '<svg class="logo-ton" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28" fill="#26A17B"/><path fill="#fff" d="M31 25.3v-3.9h8.9v-5.9H16.1v5.9H25v3.9c-7.2.3-12.6 1.8-12.6 3.5s5.4 3.2 12.6 3.5v12.5h6V32.3c7.2-.3 12.6-1.8 12.6-3.5s-5.4-3.2-12.6-3.5Zm0 5.9c-.2 0-1.2.1-3 .1-1.5 0-2.6-.1-3-.1-6.4-.3-11.1-1.4-11.1-2.7s4.7-2.4 11.1-2.7v4.4c.4 0 1.6.1 3 .1 1.7 0 2.6-.1 3-.1v-4.4c6.4.3 11.1 1.4 11.1 2.7s-4.7 2.4-11.1 2.7Z"/></svg>';
 /* сумма: целая часть ярко, дробная приглушённо */
 function money(n, d = 4, cur = '') {
-  const str = fmt(n, d), k = str.lastIndexOf(',');
+  const str = Math.abs(+n) > 0 && Math.abs(+n) < 10 ** -d ? fmtAmt(n) : fmt(n, d), k = str.lastIndexOf(',');
   const int = k < 0 ? str : str.slice(0, k), frac = k < 0 ? '' : str.slice(k);
   return `${int}<span class="frac">${frac}</span>${cur ? `<span class="cur">${cur}</span>` : ''}`;
 }
@@ -787,7 +789,7 @@ setInterval(() => { const a = document.getElementById('ago'); if (a) a.textConte
 function tokenRow({ asset, logo, name, verified, scam, sub, amount, symbol, usdLine, zero }) {
   return `<div class="item tap${zero ? ' zero' : ''}${scam ? ' scam' : ''}" data-asset="${esc(asset)}"><div class="ico">${logo}</div>
     <div class="mid"><b>${esc(name)}${scam ? SCAM_TAG : ''}${verified ? `<span class="ok" title="Проверенный токен">${ic('check', 14)}</span>` : ''}</b><small>${sub}</small></div>
-    <div class="right">${hid(fmt(amount))} ${esc(symbol)}<small>${usdLine}</small></div></div>`;
+    <div class="right">${hid(fmtAmt(amount))} ${esc(symbol)}<small>${usdLine}</small></div></div>`;
 }
 function tokensHtml() {
   const rows = [];
@@ -1035,7 +1037,9 @@ async function buildSwap(d, secretKey, seqno) {
 function unitsToNum(u, dec) { return Number(u) / 10 ** dec; }
 V.swap = () => {
   const toks = swapTokens();
+  // допуск изменения курса фиксированный 1%: если курс уйдёт сильнее, обмен отменится и деньги вернутся
   const st = S.swap || (S.swap = { from: 'TON', to: POPULAR[0].id, amount: '', slip: 0.01 });
+  st.slip = 0.01;
   const from = toks.find(t => t.id === st.from) || toks[0];
   const to = toks.find(t => t.id === st.to && t.id !== from.id) || toks.find(t => t.id !== from.id);
   st.from = from.id; st.to = to.id;
@@ -1049,7 +1053,6 @@ V.swap = () => {
     <button class="flip" id="b-flip" aria-label="Поменять местами">${ic('updown', 18)}</button>
     <div class="field"><small class="lbl">Получаешь</small>${pick('to', to)}</div>
     <div class="quote" id="quote"><div class="q-main">—</div></div>
-    <div class="field"><small class="lbl">Проскальзывание</small><div class="seg">${[0.005, 0.01, 0.03].map(v => `<button type="button" data-slip="${v}" class="${st.slip === v ? 'on' : ''}">${v * 100}%</button>`).join('')}</div></div>
     <div class="err" id="err"></div>
     <button class="btn primary" id="b-go" disabled>Обменять</button>
   </div>`;
@@ -1104,7 +1107,6 @@ V.swap = () => {
   $('#b-flip').onclick = () => { [st.from, st.to] = [st.to, st.from]; st.amount = ''; render('swap'); };
   app.querySelectorAll('[data-from]').forEach(b => b.onclick = () => { st.from = b.dataset.from; if (st.to === st.from) st.to = from.id; st.amount = ''; render('swap'); });
   app.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { st.to = b.dataset.to; render('swap'); });
-  app.querySelectorAll('[data-slip]').forEach(b => b.onclick = () => { st.slip = +b.dataset.slip; app.querySelectorAll('[data-slip]').forEach(x => x.classList.toggle('on', x === b)); quote(); });
   $('#b-go').onclick = () => {
     const q = S.swapSim; if (!q) return;
     const deadline = Math.floor(Date.now() / 1000) + 15 * 60;
@@ -1164,7 +1166,7 @@ function historyHtml(only, emptyText) {
       const val = a.TonTransfer ? Number(t.amount) / 1e9 : Number(t.amount) / 10 ** (t.jetton?.decimals ?? 9);
       const sym = a.TonTransfer ? 'TON' : (t.jetton?.symbol || '');
       title = incoming ? 'Получено' : 'Отправлено'; dir = incoming ? ic('down') : ic('up'); cls = incoming ? 'plus' : 'minus';
-      amount = `${incoming ? '+' : '−'}${fmt(val)} ${esc(sym)}`;
+      amount = `${incoming ? '+' : '−'}${fmtAmt(val, a.TonTransfer ? 9 : (t.jetton?.decimals ?? 9))} ${esc(sym)}`;
       sub = (incoming ? 'от ' : 'кому ') + otherAddr + (t.comment ? ' · «' + t.comment + '»' : '');
     }
     const scam = isScamEvent(e);
