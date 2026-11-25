@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.starlify.wallet",
+        "sha256_cert_fingerprints": ["4B:8C:8E:12:37:08:CD:E4:AD:A9:F2:D4:8D:95:3B:6D:0E:64:A7:8D:3F:4C:1B:A0:40:12:38:36:5D:8F:AA:04"]
+      }
+    }]

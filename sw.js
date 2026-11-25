@@ -2,7 +2,7 @@
    Нужен, чтобы кошелёк ставился как приложение и открывался без интернета.
    Файлы приложения: сначала сеть (чтобы обновления приходили сразу), при её отсутствии — кэш.
    Запросы к TonAPI/CoinGecko не кэшируются никогда. */
-const CACHE = 'vxw-v16';
+const CACHE = 'vxw-v17';
 const APP = ['./', 'index.html', 'wallet.js', 'manifest.json', 'icon-192.png', 'icon-512.png', 'emblem-96.png'];
 const LIBS = [
   'https://cdn.jsdelivr.net/npm/tonweb@0.0.66/dist/tonweb.js',
@@ -24,7 +24,8 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const sameOrigin = url.origin === self.location.origin;
   const isLib = LIBS.includes(url.href);
-  if (!sameOrigin && !isLib) return;            // API и прочее — напрямую в сеть
+  if (!sameOrigin && !isLib) return;
+  if (sameOrigin && (url.pathname.startsWith('/downloads/') || url.pathname.startsWith('/.well-known/'))) return;   // файлы для скачивания не кэшируем            // API и прочее — напрямую в сеть
   if (isLib) {                                   // библиотеки с фиксированной версией — из кэша
     e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
     return;
