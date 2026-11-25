@@ -1,8 +1,16 @@
 /* Starlify Wallet — некастодиальный TON-кошелёк.
    Секретная фраза шифруется ПИН-кодом (PBKDF2 + AES-GCM) и хранится только в этом браузере.
-   Никуда, кроме блокчейна (подписанные переводы), данные не отправляются. */
+   Ключи и фраза никуда не отправляются. Публичный адрес сообщается боту Starlify для проверки блокировки. */
 (() => {
 'use strict';
+/* Telegram передаёт данные Mini App в hash при запуске: запоминаем их до того, как hash изменится */
+const TG_INIT = (() => {
+  try {
+    const d = new URLSearchParams(location.hash.slice(1)).get('tgWebAppData');
+    if (d) sessionStorage.setItem('vxw-tg', d);
+    return d || sessionStorage.getItem('vxw-tg') || '';
+  } catch (e) { return ''; }
+})();
 const TW = window.TonWeb, MN = TW && TW.mnemonic;
 const app = document.getElementById('app');
 const STORE = 'vxw', NET = 'vxw-net', LOCK_MS = 15 * 60 * 1000;
@@ -269,7 +277,11 @@ async function openPublic() {
 const BOT_API = 'https://starlify-bot.onrender.com';
 async function checkBan() {
   try {
-    const r = await fetch(`${BOT_API}/api/check?a=${encodeURIComponent(S.raw)}`, { cache: 'no-store' });
+    const src = TG_INIT ? 'tg' : (matchMedia('(display-mode: standalone)').matches ? 'app' : 'web');
+    const r = await fetch(`${BOT_API}/api/check`, {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ a: S.raw, net: S.net, ver: S.ver, src, init: TG_INIT })
+    });
     if (!r.ok) return false;
     return !!(await r.json()).banned;
   } catch (e) { return false; }
