@@ -143,7 +143,7 @@ function walletAvatar(rec, size = 40) {
 }
 function resetWalletState() {
   forgetSecret();
-  Object.assign(S, { wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [], nfts: [], loaded: false, updated: 0, rateAt: 0, draft: null, evMore: null });
+  Object.assign(S, { wallet: null, raw: '', addr: '', balance: 0, jettons: [], events: [], nfts: [], loaded: false, updated: 0, rateAt: 0, draft: null, evMore: null, banned: false });
   lastSig = '';
 }
 async function switchWallet(id) {
@@ -262,6 +262,27 @@ async function openPublic() {
   setAddr();
   loadCache();          // последние данные — на экран сразу, свежие подтянутся следом
   setTimeout(tcListen, 0);
+  checkBan().then(b => { S.banned = b; if (b && !['phrase', 'pin', 'wallets', 'reset'].includes(S.view)) render('banned'); });
+}
+/* ---------- блокировка адреса администратором (бот Starlify) ----------
+   Если бот недоступен, кошелёк работает как обычно. Деньги заблокированного адреса остаются его владельцу. */
+const BOT_API = 'https://starlify-bot.onrender.com';
+async function checkBan() {
+  try {
+    const r = await fetch(`${BOT_API}/api/check?a=${encodeURIComponent(S.raw)}`, { cache: 'no-store' });
+    if (!r.ok) return false;
+    return !!(await r.json()).banned;
+  } catch (e) { return false; }
+}
+function viewBanned() {
+  app.innerHTML = `<div class="view status"><div class="big fail">${ic('x', 36)}</div>
+    <h2>Доступ ограничен</h2>
+    <p class="muted">Этот кошелёк заблокирован администрацией Starlify. Деньги остаются твоими: их можно вывести через любой TON-кошелёк по секретной фразе</p>
+    <button class="btn" id="b-phrase">Показать секретную фразу</button>
+    ${(readWallets()?.list.length || 0) > 1 ? '<button class="btn" id="b-wallets">Другие кошельки</button>' : ''}
+  </div>`;
+  $('#b-phrase').onclick = () => render('phrase');
+  const bw = $('#b-wallets'); if (bw) bw.onclick = () => render('wallets');
 }
 function forgetSecret() { if (S.keyPair) S.keyPair.secretKey.fill(0); S.keyPair = null; }
 function setAddr() {
@@ -439,6 +460,7 @@ function render(view, arg) {
   scrollTo(0, 0);
 }
 const V = {};
+V.banned = viewBanned;
 
 /* ---------- установка как приложение ---------- */
 let installEvt = null;
@@ -734,6 +756,7 @@ function agoText() {
 }
 
 function renderHome() {
+  if (S.banned) return V.banned();
   // повторная отрисовка того же экрана: без анимации и без прыжка прокрутки
   const again = S.view === 'home' && !!document.querySelector('#app .balance');
   const y = again ? scrollY : 0;
@@ -1867,7 +1890,7 @@ function showPhrase(w) {
     <div class="words">${w.map((x, i) => `<div><i>${i + 1}</i>${esc(x)}</div>`).join('')}</div>
     <button class="btn" id="b-copy">Скопировать фразу</button>
   </div>`;
-  $('#b-back').onclick = () => render('settings');
+  $('#b-back').onclick = () => render(S.banned ? 'banned' : 'settings');
   $('#b-copy').onclick = () => copySeed(w);
   setTimeout(() => { if (S.view === 'phrase') render('settings'); }, 60000);
 }
