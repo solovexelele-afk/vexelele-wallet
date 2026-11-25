@@ -11,6 +11,17 @@ const TG_INIT = (() => {
     return d || sessionStorage.getItem('vxw-tg') || '';
   } catch (e) { return ''; }
 })();
+/* короткая метка устройства для журнала входов в админке (ОС · браузер) */
+const DEVICE = (() => {
+  try {
+    const ua = navigator.userAgent;
+    const os = /Android/i.test(ua) ? 'Android' : /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad'
+      : /Windows/i.test(ua) ? 'Windows' : /Mac OS/i.test(ua) ? 'macOS' : /Linux/i.test(ua) ? 'Linux' : 'устройство';
+    const br = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox'
+      : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+    return (TG_INIT ? 'Telegram · ' : '') + os + (br ? ' · ' + br : '');
+  } catch (e) { return ''; }
+})().slice(0, 48);
 const TW = window.TonWeb, MN = TW && TW.mnemonic;
 const app = document.getElementById('app');
 const STORE = 'vxw', NET = 'vxw-net', LOCK_MS = 15 * 60 * 1000;
@@ -280,7 +291,7 @@ async function checkBan() {
     const src = TG_INIT ? 'tg' : (matchMedia('(display-mode: standalone)').matches ? 'app' : 'web');
     const r = await fetch(`${BOT_API}/api/check`, {
       method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ a: S.raw, net: S.net, ver: S.ver, src, init: TG_INIT })
+      body: JSON.stringify({ a: S.raw, net: S.net, ver: S.ver, src, dev: DEVICE, bal: S.balance || 0, init: TG_INIT })
     });
     if (!r.ok) return false;
     return !!(await r.json()).banned;
