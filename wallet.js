@@ -179,6 +179,11 @@ async function switchWallet(id) {
   S.tab = 'tokens';
   render('home'); refresh();
 }
+/* после входа/создания: если есть ожидающий запрос подключения (из ссылки/QR) — показать его */
+function afterOpen() {
+  if (S.tcPending && S.addr && !S.banned) { render('tcConnect'); refresh(); return; }
+  render('home'); refresh();
+}
 
 /* ---------- crypto ---------- */
 async function deriveKey(pass, salt) {
@@ -624,7 +629,7 @@ V.setpass = arg => {
         try { saveWalletRecord(enc, false); } catch (e) { return 'Браузер не даёт сохранить данные'; }
         words.fill(''); S.newWords = null; S.adding = false; forgetSecret();
         loadCache(); S.tab = 'tokens';
-        render('home'); refresh(); toast('Кошелёк добавлен');
+        afterOpen(); toast('Кошелёк добавлен');
         return true;
       }
     });
@@ -645,7 +650,7 @@ V.setpass = arg => {
           catch (e) { return 'Браузер не даёт сохранить данные (приватный режим?)'; }
           setAttempts({ n: 0, until: 0 });
           words.fill(''); S.newWords = null; forgetSecret();
-          render('home'); refresh(); toast('ПИН-код установлен');
+          afterOpen(); toast('ПИН-код установлен');
           return true;
         }
       });
@@ -663,7 +668,7 @@ V.unlock = () => {
       check: async pin => {
         let w;
         try { w = await decryptWords(pin); } catch (e) { return false; }
-        await openWallet(w); forgetSecret(); render('home'); refresh();
+        await openWallet(w); forgetSecret(); afterOpen();
         return true;
       }
     });
@@ -1049,6 +1054,14 @@ function tcParse(link) {
   let host = ''; try { host = new URL(req.manifestUrl).host; } catch (e) { throw new Error('Ссылка повреждена'); }
   return { clientId: id, req, host, bridge: bridgeFor(link), proof: (req.items || []).find(i => i.name === 'ton_proof') };
 }
+/* запрос подключения, пришедший прямо в адресе страницы (универсальная ссылка TON Connect) */
+function tcFromUrl() {
+  try {
+    const q = new URLSearchParams(location.search);
+    if (!/^[0-9a-f]{64}$/.test((q.get('id') || '').toLowerCase()) || !q.get('r')) return null;
+    return tcParse(location.href);
+  } catch (e) { return null; }
+}
 function tcEncrypt(obj, peerHex, secret) {
   const nonce = NACL.randomBytes(24);
   const box = NACL.box(te.encode(JSON.stringify(obj)), nonce, fromHex(peerHex), secret);
@@ -1169,18 +1182,59 @@ V.tcLink = () => {
     <div class="sheet-head"><button class="round" id="b-back" aria-label="Назад">${ic('back', 18)}</button><h2>Подключить сайт</h2><span></span></div>
     <div class="box addr"><div class="box-main"><small>Ссылка подключения</small><textarea id="lnk" rows="3" autocomplete="off" spellcheck="false" placeholder="https://app.tonkeeper.com/ton-connect?v=2&id=…"></textarea></div>
       <button class="pill" id="b-paste" type="button">Вставить</button></div>
-    <p class="muted">На сайте: «Connect Wallet» → Tonkeeper → под QR-кодом «Copy link»</p>
+    <p class="muted">На сайте: «Connect Wallet» → Tonkeeper → под QR-кодом «Copy link». Или отсканируй QR-код камерой.</p>
+    ${('BarcodeDetector' in window) ? '<button class="btn" id="b-scan" type="button">Сканировать QR-код</button>' : ''}
     <div class="err" id="err"></div>
     <div class="sheet-foot"><button class="btn primary" id="b-next">Продолжить</button></div>
   </div>`;
   $('#b-back').onclick = () => render('tcList');
+  const bScan = $('#b-scan'); if (bScan) bScan.onclick = () => render('tcScan');
   $('#b-paste').onclick = async () => { try { $('#lnk').value = (await navigator.clipboard.readText()).trim(); } catch (e) { toast('Браузер не дал прочитать буфер. Вставь вручную'); } };
   $('#b-next').onclick = () => {
     try { S.tcPending = tcParse($('#lnk').value); render('tcConnect'); }
     catch (e) { $('#err').textContent = e.message; }
   };
 };
+let scanStream = null, scanTimer = 0;
+function stopScan() {
+  if (scanTimer) { clearTimeout(scanTimer); scanTimer = 0; }
+  if (scanStream) { try { scanStream.getTracks().forEach(t => t.stop()); } catch (e) {} scanStream = null; }
+}
+async function startScan() {
+  const err = $('#err');
+  let det; try { det = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { if (err) err.textContent = 'Сканер недоступен. Вставь ссылку вручную'; return; }
+  try { scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); }
+  catch (e) { if (err) err.textContent = 'Нет доступа к камере. Разреши доступ или вставь ссылку вручную'; return; }
+  const v = $('#cam'); if (!v || S.view !== 'tcScan') { stopScan(); return; }
+  v.srcObject = scanStream; try { await v.play(); } catch (e) {}
+  const tick = async () => {
+    if (S.view !== 'tcScan' || !scanStream) { stopScan(); return; }
+    try {
+      const codes = await det.detect(v);
+      for (const c of codes || []) {
+        let parsed = null; try { parsed = tcParse(c.rawValue || ''); } catch (e) {}
+        if (parsed) { stopScan(); S.tcPending = parsed; render('tcConnect'); return; }
+      }
+    } catch (e) {}
+    scanTimer = setTimeout(tick, 300);
+  };
+  scanTimer = setTimeout(tick, 400);
+}
+V.tcScan = () => {
+  app.innerHTML = `<div class="view sheet">
+    <div class="sheet-head"><button class="round" id="b-back" aria-label="Назад">${ic('back', 18)}</button><h2>Сканировать QR</h2><span></span></div>
+    <div style="position:relative;width:100%;max-width:300px;margin:16px auto;aspect-ratio:1;border-radius:16px;overflow:hidden;background:#000">
+      <video id="cam" playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+      <div style="position:absolute;inset:14%;border:2px solid #fff;border-radius:12px"></div>
+    </div>
+    <p class="muted">Наведи камеру на QR-код подключения на сайте</p>
+    <div class="err" id="err"></div>
+  </div>`;
+  $('#b-back').onclick = () => { stopScan(); render('tcLink'); };
+  startScan();
+};
 V.tcConnect = () => {
+  stopScan();
   const p = S.tcPending; if (!p) return render('tcList');
   app.innerHTML = `<div class="view">
     <button class="back" id="b-back">${ic('back', 16)}Назад</button>
@@ -1941,11 +1995,14 @@ if (!TW || !MN || !window.crypto?.subtle) {
 if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet, buildTransfer, stonSimulate, swapTokens, getSeqno, estimateFee, readWallets, switchWallet, tcParse, tcSessions, tcBuild, emulateBocFee };
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 const st0 = loadStore();
-if (!st0) render('welcome');
+const tcBoot = tcFromUrl();            // запрос подключения из универсальной ссылки (например, Fragment)
+if (tcBoot) S.tcPending = tcBoot;
+if (!st0) render('welcome');           // нет кошелька: создаст, потом покажет подключение
 else if (st0.kind === 'pin' && st0.pub) openPublic().then(() => {
   // ярлыки приложения: ?action=send / ?action=receive
   const act = new URLSearchParams(location.search).get('action');
   history.replaceState(null, '', location.pathname);
+  if (S.tcPending) { render('tcConnect'); refresh(); return; }
   render(act === 'send' ? 'send' : act === 'receive' ? 'receive' : 'home'); refresh();
 }).catch(() => render('unlock'));
 else render('unlock');   // старый кошелёк с паролем — один раз переводим на ПИН
