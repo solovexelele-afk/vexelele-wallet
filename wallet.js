@@ -22,6 +22,12 @@ const DEVICE = (() => {
     return (TG_INIT ? 'Telegram · ' : '') + os + (br ? ' · ' + br : '');
   } catch (e) { return ''; }
 })().slice(0, 48);
+/* чтобы кошелёк не стирался при закрытии приложения: просим браузер хранить данные постоянно.
+   Работает и в установленном приложении (PWA/APK), и в расширении, и в обычном браузере. */
+try {
+  if (navigator.storage && navigator.storage.persist)
+    navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => {});
+} catch (e) {}
 const TW = window.TonWeb, MN = TW && TW.mnemonic;
 const app = document.getElementById('app');
 const STORE = 'vxw', NET = 'vxw-net', LOCK_MS = 15 * 60 * 1000;
