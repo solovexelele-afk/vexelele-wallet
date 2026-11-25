@@ -73,7 +73,7 @@ const IC = {
   percent: '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>'
 };
 const ic = (n, size = 18) => `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
-const STAR = (size = 16) => `<svg class="emblem" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6.5" fill="#1677c9"/><g transform="rotate(-25 12 12)"><circle cx="12" cy="12" r="7.4" fill="#fff"/><path d="M12 4.6a3.7 3.7 0 0 0 0 7.4a3.7 3.7 0 0 1 0 7.4" fill="none" stroke="#1677c9" stroke-width="1.15"/></g></svg>`;
+const STAR = (size = 16) => `<img class="emblem" src="emblem-96.png" width="${size}" height="${size}" alt="">`;
 const TON_LOGO = '<svg class="logo-ton" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28" fill="#0098EA"/><path fill="#fff" d="M37.56 15.63H18.44c-3.52 0-5.74 3.79-3.98 6.86l11.8 20.45a2 2 0 0 0 3.47 0l11.8-20.45c1.77-3.06-.46-6.86-3.97-6.86Zm-11.3 21.18-2.58-4.98-6.2-11.09a1.08 1.08 0 0 1 .95-1.62h7.82v17.69Zm12.25-16.07-6.2 11.1-2.57 4.97V19.12h7.82c.86 0 1.36.91.95 1.62Z"/></svg>';
 const USDT_LOGO = '<svg class="logo-ton" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28" fill="#26A17B"/><path fill="#fff" d="M31 25.3v-3.9h8.9v-5.9H16.1v5.9H25v3.9c-7.2.3-12.6 1.8-12.6 3.5s5.4 3.2 12.6 3.5v12.5h6V32.3c7.2-.3 12.6-1.8 12.6-3.5s-5.4-3.2-12.6-3.5Zm0 5.9c-.2 0-1.2.1-3 .1-1.5 0-2.6-.1-3-.1-6.4-.3-11.1-1.4-11.1-2.7s4.7-2.4 11.1-2.7v4.4c.4 0 1.6.1 3 .1 1.7 0 2.6-.1 3-.1v-4.4c6.4.3 11.1 1.4 11.1 2.7s-4.7 2.4-11.1 2.7Z"/></svg>';
 /* сумма: целая часть ярко, дробная приглушённо */

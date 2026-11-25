@@ -50,6 +50,7 @@
   .asset-head .muted{font-size:14px}
   .actions.two{grid-template-columns:repeat(2,1fr);max-width:240px;margin:0 auto;width:100%}
   .act:disabled{opacity:.35;pointer-events:none}
+  img.emblem{border-radius:24%;display:block;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.16)}
   .logo .muted{font-weight:400}
 
   main{max-width:480px;margin:0 auto;padding:24px max(24px,env(safe-area-inset-right,0px)) calc(64px + env(safe-area-inset-bottom,0px)) max(24px,env(safe-area-inset-left,0px))}
@@ -308,7 +309,7 @@
 
   /* ---------- заставка ---------- */
   #splash{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:var(--bg)}
-  #splash svg{animation:pulse 1.2s var(--ease) infinite alternate}
+  #splash img{border-radius:22px;animation:pulse 1.2s var(--ease) infinite alternate}
   @keyframes pulse{from{opacity:.55;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
 
 
@@ -388,9 +389,9 @@
 </head>
 <body>
 <header class="top">
-  <a href="./" class="logo"><svg class="emblem" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6.5" fill="#1677c9"/><g transform="rotate(-25 12 12)"><circle cx="12" cy="12" r="7.4" fill="#fff"/><path d="M12 4.6a3.7 3.7 0 0 0 0 7.4a3.7 3.7 0 0 1 0 7.4" fill="none" stroke="#1677c9" stroke-width="1.15"/></g></svg>Starlify <span class="muted">Wallet</span></a>
+  <a href="./" class="logo"><img class="emblem" src="emblem-96.png" width="24" height="24" alt="">Starlify <span class="muted">Wallet</span></a>
 </header>
-<div id="splash" aria-label="Загрузка"><svg width="64" height="64" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6.5" fill="#1677c9"/><g transform="rotate(-25 12 12)"><circle cx="12" cy="12" r="7.4" fill="#fff"/><path d="M12 4.6a3.7 3.7 0 0 0 0 7.4a3.7 3.7 0 0 1 0 7.4" fill="none" stroke="#1677c9" stroke-width="1.15"/></g></svg></div>
+<div id="splash" aria-label="Загрузка"><img src="icon-192.png" width="88" height="88" alt=""></div>
 <main id="app"></main>
 <div class="toast" id="toast"></div>
 
