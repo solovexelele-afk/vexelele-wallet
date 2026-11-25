@@ -185,7 +185,7 @@ class W5Wallet {
     this.walletId = testnet ? 2147483645 : 2147483409;   // network_id XOR context (workchain 0, subwallet 0)
     this.code = TW.boc.Cell.oneFromBoc(TW.utils.base64ToBytes(W5_CODE));
     const self = this;
-    this.methods = { transfer: p => ({ getQuery: () => self.transferQuery(p) }) };
+    this.methods = { transfer: p => ({ getQuery: () => self.transferQuery(p) }), transfers: p => ({ getQuery: () => self.transfersQuery(p) }) };
   }
   data() {
     const d = new TW.boc.Cell();
@@ -209,17 +209,25 @@ class W5Wallet {
     return this.addr;
   }
   async transferQuery({ secretKey, toAddress, amount, seqno, payload, sendMode }) {
+    return this.transfersQuery({ secretKey, seqno, messages: [{ toAddress, amount, payload, sendMode }] });
+  }
+  async transfersQuery({ secretKey, seqno, messages, validUntil }) {
     const C = TW.boc.Cell;
-    // W5 принимает от внешних сообщений только режимы с флагом +2
-    const mode = sendMode === 128 ? 130 : (sendMode | 2);
-    const msg = TW.Contract.createOutMsg(toAddress, amount, payload || '', null);
-    const act = new C();
-    act.refs.push(new C());                               // предыдущий список действий (пусто)
-    act.bits.writeUint(0x0ec3c86d, 32); act.bits.writeUint(mode, 8); act.refs.push(msg);
+    // список действий: каждое следующее ссылается на предыдущее
+    let act = new C();
+    for (const m of messages) {
+      // W5 принимает от внешних сообщений только режимы с флагом +2
+      const mode = m.sendMode === 128 ? 130 : ((m.sendMode ?? 3) | 2);
+      const msg = TW.Contract.createOutMsg(m.toAddress, m.amount, m.payload || '', m.stateInit || null);
+      const a = new C();
+      a.refs.push(act);
+      a.bits.writeUint(0x0ec3c86d, 32); a.bits.writeUint(mode, 8); a.refs.push(msg);
+      act = a;
+    }
     const sm = new C();
     sm.bits.writeUint(0x7369676e, 32);                    // "sign"
     sm.bits.writeUint(this.walletId, 32);
-    sm.bits.writeUint(seqno === 0 ? 0xffffffff : Math.floor(Date.now() / 1000) + 60, 32);
+    sm.bits.writeUint(seqno === 0 ? 0xffffffff : (validUntil || Math.floor(Date.now() / 1000) + 60), 32);
     sm.bits.writeUint(seqno, 32);
     sm.bits.writeBit(1); sm.refs.push(act);
     sm.bits.writeBit(0);
@@ -253,6 +261,7 @@ async function openPublic() {
   S.addrObj = await S.wallet.getAddress();
   setAddr();
   loadCache();          // последние данные — на экран сразу, свежие подтянутся следом
+  setTimeout(tcListen, 0);
 }
 function forgetSecret() { if (S.keyPair) S.keyPair.secretKey.fill(0); S.keyPair = null; }
 function setAddr() {
@@ -963,6 +972,248 @@ async function buildNftTransfer(d, secretKey, seqno) {
   return S.wallet.methods.transfer({ secretKey, toAddress: item, amount: TW.utils.toNano(NFT_GAS), seqno, payload: body, sendMode: 3 }).getQuery();
 }
 
+/* ---------- TON Connect: подключение к сайтам (Fragment, getgems и др.) ----------
+   Протокол v2: сайт показывает ссылку с его публичным ключом и запросом, кошелёк отвечает
+   зашифрованными (nacl box) сообщениями через HTTP-мост. Ключи кошелька никуда не уходят. */
+const NACL = TW.utils.nacl;
+const hexOf = u8 => TW.utils.bytesToHex(u8), fromHex = h => TW.utils.hexToBytes(h);
+function bridgeFor(link) {
+  let h = ''; try { h = new URL(link.replace(/^tc:\/\//, 'https://tc.local/')).host; } catch (e) {}
+  if (/(^|\.)t\.me$|walletbot\.me$/.test(h)) return 'https://walletbot.me/tonconnect-bridge/bridge';
+  if (/mytonwallet/.test(h)) return 'https://tonconnectbridge.mytonwallet.org/bridge';
+  return 'https://bridge.tonapi.io/bridge';
+}
+const tcKey = () => 'vxw-tc-' + (readWallets()?.active || '');
+function tcSessions() { try { return JSON.parse(localStorage.getItem(tcKey())) || []; } catch (e) { return []; } }
+function tcSave(list) { try { localStorage.setItem(tcKey(), JSON.stringify(list)); } catch (e) {} }
+function tcParse(link) {
+  link = String(link || '').trim();
+  let q;
+  try { q = new URL(link.replace(/^tc:\/\//, 'https://tc.local/')).searchParams; } catch (e) { throw new Error('Это не ссылка подключения'); }
+  const id = (q.get('id') || '').toLowerCase(), r = q.get('r');
+  if (!/^[0-9a-f]{64}$/.test(id) || !r) throw new Error('Это не ссылка подключения');
+  let req; try { req = JSON.parse(r); } catch (e) { throw new Error('Ссылка повреждена'); }
+  if (!req.manifestUrl) throw new Error('В ссылке нет данных сайта');
+  let host = ''; try { host = new URL(req.manifestUrl).host; } catch (e) { throw new Error('Ссылка повреждена'); }
+  return { clientId: id, req, host, bridge: bridgeFor(link), proof: (req.items || []).find(i => i.name === 'ton_proof') };
+}
+function tcEncrypt(obj, peerHex, secret) {
+  const nonce = NACL.randomBytes(24);
+  const box = NACL.box(te.encode(JSON.stringify(obj)), nonce, fromHex(peerHex), secret);
+  const out = new Uint8Array(24 + box.length); out.set(nonce); out.set(box, 24);
+  return b64(out);
+}
+function tcDecrypt(msg, peerHex, secret) {
+  const all = unb64(msg);
+  const m = NACL.box.open(all.slice(24), all.slice(0, 24), fromHex(peerHex), secret);
+  if (!m) throw new Error('decrypt');
+  return JSON.parse(td.decode(m));
+}
+async function tcPost(sess, obj) {
+  const body = tcEncrypt(obj, sess.clientId, fromHex(sess.sec));
+  const r = await fetch(`${sess.bridge}/message?client_id=${sess.pub}&to=${sess.clientId}&ttl=300`, { method: 'POST', body });
+  if (!r.ok) throw new Error('Мост не принял сообщение (' + r.status + ')');
+}
+const concatU8 = (...a) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of a) { o.set(x, i); i += x.length; } return o; };
+async function sha256(u8) { return new Uint8Array(await crypto.subtle.digest('SHA-256', u8)); }
+async function tonProof(host, payload, secretKey) {
+  const ts = Math.floor(Date.now() / 1000), dom = te.encode(host);
+  const wc = new Uint8Array(4); new DataView(wc.buffer).setInt32(0, S.addrObj.wc, false);
+  const dl = new Uint8Array(4); new DataView(dl.buffer).setUint32(0, dom.length, true);
+  const tsb = new Uint8Array(8); new DataView(tsb.buffer).setBigUint64(0, BigInt(ts), true);
+  const msg = concatU8(te.encode('ton-proof-item-v2/'), wc, S.addrObj.hashPart, dl, dom, tsb, te.encode(payload || ''));
+  const full = await sha256(concatU8(new Uint8Array([0xff, 0xff]), te.encode('ton-connect'), await sha256(msg)));
+  return { timestamp: ts, domain: { lengthBytes: dom.length, value: host }, signature: b64(NACL.sign.detached(full, secretKey)), payload: payload || '' };
+}
+async function walletStateInitB64() {
+  const cell = S.wallet.stateInit ? S.wallet.stateInit() : (await S.wallet.createStateInit()).stateInit;
+  return b64(await cell.toBoc(false));
+}
+const TC_DEVICE = { platform: 'browser', appName: 'starlify', appVersion: '1.0.0', maxProtocolVersion: 2, features: ['SendTransaction', { name: 'SendTransaction', maxMessages: 4 }] };
+async function tcConnect(parsed, secretKey) {
+  const kp = NACL.box.keyPair();
+  const sess = { clientId: parsed.clientId, pub: hexOf(kp.publicKey), sec: hexOf(kp.secretKey), bridge: parsed.bridge, host: parsed.host, at: Date.now() };
+  const items = [{ name: 'ton_addr', address: S.addrObj.toString(false), network: '-239', publicKey: hexOf(S.pub), walletStateInit: await walletStateInitB64() }];
+  if (parsed.proof) items.push({ name: 'ton_proof', proof: await tonProof(parsed.host, parsed.proof.payload, secretKey) });
+  await tcPost(sess, { event: 'connect', id: Date.now(), payload: { items, device: TC_DEVICE } });
+  const list = tcSessions().filter(x => x.clientId !== sess.clientId); list.push(sess); tcSave(list);
+  tcListen();
+  return sess;
+}
+async function tcDisconnect(sess) {
+  try { await tcPost(sess, { event: 'disconnect', id: Date.now(), payload: {} }); } catch (e) {}
+  tcSave(tcSessions().filter(x => x.clientId !== sess.clientId)); tcListen();
+}
+let tcStreams = [];
+function tcListen() {
+  tcStreams.forEach(es => es.close()); tcStreams = [];
+  if (!S.raw) return;
+  const by = {};
+  for (const x of tcSessions()) (by[x.bridge] = by[x.bridge] || []).push(x);
+  for (const [bridge, list] of Object.entries(by)) {
+    let last = ''; try { last = localStorage.getItem('vxw-tc-last-' + bridge) || ''; } catch (e) {}
+    const es = new EventSource(`${bridge}/events?client_id=${list.map(x => x.pub).join(',')}${last ? '&last_event_id=' + encodeURIComponent(last) : ''}`);
+    es.onmessage = e => {
+      try { if (e.lastEventId) localStorage.setItem('vxw-tc-last-' + bridge, e.lastEventId); } catch (x) {}
+      let data; try { data = JSON.parse(e.data); } catch (x) { return; }
+      tcIncoming(data);
+    };
+    tcStreams.push(es);
+  }
+}
+async function tcIncoming({ from, message }) {
+  const sess = tcSessions().find(x => x.clientId === String(from || '').toLowerCase()); if (!sess) return;
+  let req; try { req = tcDecrypt(message, sess.clientId, fromHex(sess.sec)); } catch (e) { return; }
+  const reply = obj => tcPost(sess, { ...obj, id: String(req.id) }).catch(() => {});
+  if (req.method === 'disconnect') { tcSave(tcSessions().filter(x => x.clientId !== sess.clientId)); tcListen(); reply({ result: {} }); toast(`${sess.host} отключён`); return; }
+  if (req.method !== 'sendTransaction') { reply({ error: { code: 400, message: 'Method not supported' } }); return; }
+  let tx; try { tx = JSON.parse(req.params[0]); } catch (e) { reply({ error: { code: 1, message: 'Bad request' } }); return; }
+  const bad = m => { reply({ error: { code: 1, message: m } }); toast('Сайт прислал некорректный запрос'); };
+  if (tx.network && String(tx.network) !== '-239') return bad('Wrong network');
+  if (tx.from) { try { if (new TW.utils.Address(tx.from).toString(false).toLowerCase() !== S.raw) return bad('Wrong wallet'); } catch (e) { return bad('Bad from'); } }
+  if (!Array.isArray(tx.messages) || !tx.messages.length || tx.messages.length > 4) return bad('Bad messages');
+  if (tx.valid_until && tx.valid_until * (tx.valid_until > 1e12 ? 0.001 : 1) < Date.now() / 1000) return bad('Request expired');
+  S.tcReq = { sess, req, tx, reply };
+  render('tcTx');
+}
+function tcMessages(tx) {
+  return tx.messages.map(m => ({
+    toAddress: m.address, amount: new TW.utils.BN(String(m.amount)), sendMode: 3,
+    payload: m.payload ? TW.boc.Cell.oneFromBoc(TW.utils.base64ToBytes(m.payload)) : '',
+    stateInit: m.stateInit ? TW.boc.Cell.oneFromBoc(TW.utils.base64ToBytes(m.stateInit)) : null
+  }));
+}
+async function tcBuild(tx, secretKey, seqno) {
+  const vu = tx.valid_until ? Math.floor(tx.valid_until > 1e12 ? tx.valid_until / 1000 : tx.valid_until) : undefined;
+  return S.wallet.methods.transfers({ secretKey, seqno, messages: tcMessages(tx), validUntil: vu, expireAt: vu }).getQuery();
+}
+async function emulateBocFee(boc, needTon) {
+  const balance = Math.round(Math.max(S.balance, needTon + 1) * 1e9);
+  const r = await fetchRetry(api() + '/v2/wallet/emulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boc, params: [{ address: S.raw, balance }] }) });
+  if (!r.ok) throw new Error('emulate ' + r.status);
+  const j = await r.json();
+  return { fee: Math.max(0, -Number(j.event?.extra || 0)) / 1e9, actions: j.event?.actions || [] };
+}
+const siteIcon = host => `<img src="https://${esc(host)}/favicon.ico" alt="" class="site-ico">`;
+document.addEventListener('error', e => { if (e.target?.classList?.contains('site-ico')) e.target.remove(); }, true);
+
+V.tcList = () => {
+  const list = tcSessions();
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <h2>Подключённые сайты</h2>
+    ${list.length ? `<div class="list">${list.map((x, i) => `<div class="item"><div class="ico">${siteIcon(x.host)}</div>
+      <div class="mid"><b>${esc(x.host)}</b><small>подключён ${new Date(x.at).toLocaleDateString('ru')}</small></div>
+      <button class="pill" data-off="${i}">Отключить</button></div>`).join('')}</div>` : '<div class="empty">Пока ни одного сайта</div>'}
+    <button class="btn primary" id="b-add">${ic('link', 18)}Подключить сайт</button>
+    <p class="muted">На сайте нажми «Connect Wallet», выбери Tonkeeper и скопируй ссылку под QR-кодом. Потом вставь её здесь</p>
+  </div>`;
+  $('#b-back').onclick = () => render('settings');
+  $('#b-add').onclick = () => render('tcLink');
+  app.querySelectorAll('[data-off]').forEach(b => b.onclick = async () => { b.disabled = true; await tcDisconnect(list[+b.dataset.off]); toast('Сайт отключён'); render('tcList'); });
+};
+V.tcLink = () => {
+  app.innerHTML = `<div class="view sheet">
+    <div class="sheet-head"><button class="round" id="b-back" aria-label="Назад">${ic('back', 18)}</button><h2>Подключить сайт</h2><span></span></div>
+    <div class="box addr"><div class="box-main"><small>Ссылка подключения</small><textarea id="lnk" rows="3" autocomplete="off" spellcheck="false" placeholder="https://app.tonkeeper.com/ton-connect?v=2&id=…"></textarea></div>
+      <button class="pill" id="b-paste" type="button">Вставить</button></div>
+    <p class="muted">На сайте: «Connect Wallet» → Tonkeeper → под QR-кодом «Copy link»</p>
+    <div class="err" id="err"></div>
+    <div class="sheet-foot"><button class="btn primary" id="b-next">Продолжить</button></div>
+  </div>`;
+  $('#b-back').onclick = () => render('tcList');
+  $('#b-paste').onclick = async () => { try { $('#lnk').value = (await navigator.clipboard.readText()).trim(); } catch (e) { toast('Браузер не дал прочитать буфер. Вставь вручную'); } };
+  $('#b-next').onclick = () => {
+    try { S.tcPending = tcParse($('#lnk').value); render('tcConnect'); }
+    catch (e) { $('#err').textContent = e.message; }
+  };
+};
+V.tcConnect = () => {
+  const p = S.tcPending; if (!p) return render('tcList');
+  app.innerHTML = `<div class="view">
+    <button class="back" id="b-back">${ic('back', 16)}Назад</button>
+    <div class="tx-head"><div class="ico big site">${siteIcon(p.host)}</div><h2>${esc(p.host)}</h2><p class="muted">хочет подключиться к кошельку</p></div>
+    <div class="sum">
+      <div><span>Кошелёк</span><span>${esc(walletName())} · ${esc(short(S.addr))}</span></div>
+      <div><span>Сайт увидит</span><span>адрес и баланс</span></div>
+      ${p.proof ? '<div><span>Подтверждение</span><span>подпись «я владелец адреса»</span></div>' : ''}
+    </div>
+    <div class="note">Сайт <b>не получит</b> секретную фразу и не сможет списать деньги без твоего подтверждения. Подключай только сайты, которым доверяешь</div>
+    <div class="err" id="err"></div>
+    <button class="btn primary" id="b-ok">Подключить</button>
+  </div>`;
+  $('#b-back').onclick = () => render('tcLink');
+  const done = async secretKey => {
+    try { await tcConnect(p, secretKey); S.tcPending = null; render('tcDone', p.host); }
+    catch (e) { render('tcConnect'); setTimeout(() => { const er = $('#err'); if (er) er.textContent = e.message || 'Не удалось подключиться'; }, 0); }
+  };
+  $('#b-ok').onclick = () => {
+    if (!p.proof) { $('#b-ok').disabled = true; return done(null); }
+    pinPad({
+      title: 'Подтверди подключение', sub: p.host, throttle: true, back: () => render('tcConnect'),
+      check: async pin => {
+        let kp; try { const w = await decryptWords(pin); kp = await MN.mnemonicToKeyPair(w); w.fill(''); } catch (e) { return false; }
+        app.innerHTML = '<div class="view status"><div class="spin"></div><h2>Подключаю…</h2></div>';
+        await done(kp.secretKey); kp.secretKey.fill(0); return true;
+      }
+    });
+  };
+};
+V.tcDone = host => {
+  app.innerHTML = `<div class="view status"><div class="big ok-state">${ic('check', 36)}</div><h2>Подключено</h2>
+    <p class="muted">Вернись на ${esc(host)}. Запросы на оплату будут приходить сюда</p>
+    <button class="btn primary" id="b-home">К кошельку</button></div>`;
+  $('#b-home').onclick = () => render('home');
+};
+V.tcTx = () => {
+  const q = S.tcReq; if (!q) return render('home');
+  const { sess, tx } = q;
+  const total = tx.messages.reduce((n, m) => n + Number(m.amount) / 1e9, 0);
+  app.innerHTML = `<div class="view">
+    <div class="tx-head"><div class="ico big site">${siteIcon(sess.host)}</div><h2>${esc(sess.host)}</h2><p class="muted">просит подтвердить транзакцию</p></div>
+    <div class="sum">
+      ${tx.messages.map(m => { let to = m.address; try { to = friendly(new TW.utils.Address(m.address).toString(false), true); } catch (e) {} return `<div><span>${m.payload ? 'Вызов контракта' : 'Перевод'}</span><span>${fmtAmt(Number(m.amount) / 1e9)} TON → ${esc(short(to))}</span></div>`; }).join('')}
+      <div><span>Комиссия сети</span><span id="fee">считаю…</span></div>
+      <div><span>Итого спишется</span><span id="total">${fmtAmt(total)} TON</span></div>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="row"><button class="btn" id="b-no">Отклонить</button><button class="btn primary" id="b-yes">Подтвердить</button></div>
+  </div>`;
+  (async () => {
+    try {
+      const seqno = await getSeqno();
+      const q0 = await tcBuild(tx, null, seqno);
+      const { fee } = await emulateBocFee(TW.utils.bytesToBase64(await q0.toBoc(false)), total);
+      if (S.view !== 'tcTx') return;
+      $('#fee').textContent = `${fmt(fee, 6)} TON`; $('#total').textContent = `${fmtAmt(total + fee)} TON`;
+      if (total + fee > S.balance) { $('#err').textContent = 'Недостаточно TON'; $('#b-yes').disabled = true; }
+    } catch (e) { if (S.view === 'tcTx') $('#fee').textContent = 'не удалось рассчитать'; }
+  })();
+  $('#b-no').onclick = () => { q.reply({ error: { code: 300, message: 'Reject Request' } }); S.tcReq = null; toast('Отклонено'); render('home'); };
+  $('#b-yes').onclick = () => pinPad({
+    title: 'Подтверди транзакцию', sub: `${fmtAmt(total)} TON · ${sess.host}`, throttle: true, back: () => render('tcTx'),
+    check: async pin => {
+      let kp; try { const w = await decryptWords(pin); kp = await MN.mnemonicToKeyPair(w); w.fill(''); } catch (e) { return false; }
+      app.innerHTML = '<div class="view status"><div class="spin"></div><h2>Отправляю…</h2></div>';
+      try {
+        const seqno = await getSeqno();
+        const cell = await tcBuild(tx, kp.secretKey, seqno); kp.secretKey.fill(0);
+        const boc = TW.utils.bytesToBase64(await cell.toBoc(false));
+        const r = await fetchRetry(api() + '/v2/blockchain/message', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boc }) });
+        if (!r.ok) throw new Error('Сеть отклонила транзакцию (' + r.status + ')');
+        q.reply({ result: boc }); S.tcReq = null;
+        app.innerHTML = `<div class="view status"><div class="big ok-state">${ic('check', 36)}</div><h2>Отправлено</h2><p class="muted">Вернись на ${esc(sess.host)}</p><button class="btn primary" id="b-home">К кошельку</button></div>`;
+        $('#b-home').onclick = () => { render('home'); refresh(); };
+      } catch (e) {
+        q.reply({ error: { code: 0, message: String(e.message || e) } }); S.tcReq = null;
+        app.innerHTML = `<div class="view status"><div class="big fail">${ic('x', 36)}</div><h2>Не получилось</h2><p class="muted">${esc(e.message || e)}</p><button class="btn primary" id="b-home">К кошельку</button></div>`;
+        $('#b-home').onclick = () => render('home');
+      }
+      return true;
+    }
+  });
+};
+
 /* ---------- обмен через STON.fi (роутер v2) ---------- */
 const TON_STON = 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c';
 function swapTokens() {
@@ -1578,6 +1829,7 @@ V.settings = () => {
     <button class="back" id="b-back">${ic('back', 16)}Назад</button>
     <h2>Настройки</h2>
     <div class="list">
+      <button class="setting" id="b-tc"><span>Подключённые сайты</span><span class="setting-val">${tcSessions().length || ''}${ic('chev', 16)}</span></button>
       <button class="setting" id="b-wallets"><span>Кошельки</span><span class="setting-val">${esc(walletName())}${ic('chev', 16)}</span></button>
       <button class="setting" id="b-hidescam"><span>Скрывать скам</span><span class="switch ${S.hideScam ? 'on' : ''}"></span></button>
       <button class="setting" id="b-theme"><span>Оформление</span><span class="setting-val">${S.theme === 'gray' ? 'Серое' : 'Стандартное'}${ic('chev', 16)}</span></button>
@@ -1589,6 +1841,7 @@ V.settings = () => {
   $('#b-back').onclick = () => render('home');
   $('#b-phrase').onclick = () => render('phrase');
   $('#b-wallets').onclick = () => render('wallets');
+  $('#b-tc').onclick = () => render('tcList');
   $('#b-hidescam').onclick = () => { S.hideScam = !S.hideScam; try { localStorage.setItem('vxw-hidescam', S.hideScam ? '1' : '0'); } catch (e) {} lastSig = ''; render('settings'); };
   $('#b-del').onclick = () => render('reset');
   $('#b-theme').onclick = () => {
@@ -1633,7 +1886,7 @@ if (!TW || !MN || !window.crypto?.subtle) {
   app.innerHTML = '<div class="view"><h2>Не удалось загрузить кошелёк</h2><p class="muted">Обнови страницу. Если не помогает, открой сайт в Chrome, Safari или Firefox по адресу https://…</p></div>';
   return;
 }
-if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet, buildTransfer, stonSimulate, swapTokens, getSeqno, estimateFee, readWallets, switchWallet };
+if (location.hostname === 'localhost') window.__vxw = { S, refresh, render, makeWallet, buildTransfer, stonSimulate, swapTokens, getSeqno, estimateFee, readWallets, switchWallet, tcParse, tcSessions, tcBuild, emulateBocFee };
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 const st0 = loadStore();
 if (!st0) render('welcome');
